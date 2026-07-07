@@ -1,0 +1,21 @@
+--- a/dist/session.js
++++ b/dist/session.js
+@@ -1,5 +1,5 @@
+ // ── Provider ────────────────────────────────────────────
+ // cursor/opencode are experimental and hidden in 0.8.1 — re-add them here to re-enable.
+-export const SUPPORTED_PROVIDERS = ["claude", "codex"];
++export const SUPPORTED_PROVIDERS = ["claude", "codex", "hermes"];
+ export function isProvider(value) {
+     return typeof value === "string" && SUPPORTED_PROVIDERS.includes(value);
+ }
+@@ -10,6 +10,7 @@
+ /** Global default provider, read once from env. */
+ export function getDefaultProvider() {
+     const env = process.env.DEFAULT_PROVIDER;
+-    if (!env)
+-        return "claude";
+-    return parseProvider(env, "DEFAULT_PROVIDER");
++    if (env === "hermes") return "hermes";
++    if (env === "codex") return "codex";
++    return "claude";
+ }
