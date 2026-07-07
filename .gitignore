@@ -1,0 +1,4 @@
+.proxy_secret
+.proxy_env
+*.log
+memory.json
