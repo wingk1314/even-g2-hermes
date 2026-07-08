@@ -102,13 +102,16 @@ function getSessionContext() {
 
 function callHermes(message, history) {
   return new Promise((resolve, reject) => {
-    let contextPrompt = message;
+    // Prepend glasses-optimized system hint
+    const glassesHint = '[Respond in 1-3 short sentences max. Be concise — this displays on smart glasses with a 576x288px screen. No markdown, no lists, no code blocks. Plain text only.]';
+
+    let contextPrompt = glassesHint + '\n\n' + message;
     if (history && history.length > 1) {
       const recentHistory = history.slice(-6, -1);
       const context = recentHistory.map(h =>
         `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.content}`
       ).join('\n');
-      contextPrompt = `Previous conversation:\n${context}\n\nUser: ${message}`;
+      contextPrompt = glassesHint + '\n\nPrevious conversation:\n' + context + '\n\nUser: ' + message;
     }
 
     const child = spawn('hermes', ['chat', '-q', contextPrompt, '-Q', '-t', 'hermes-cli'], {

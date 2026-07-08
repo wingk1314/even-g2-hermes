@@ -25,11 +25,14 @@
   #response-area {
     flex: 1;
     overflow-y: auto;
+    overflow-x: hidden;
     line-height: 1.4;
     font-size: 18px;
     word-wrap: break-word;
     padding-bottom: 4px;
+    scrollbar-width: none;
   }
+  #response-area::-webkit-scrollbar { display: none; }
   #divider {
     border-top: 1px solid #33ff3344;
     margin: 4px 0;
@@ -106,21 +109,107 @@
     margin-top: 4px;
     padding-left: 32px;
   }
+
+  /* ── Boot Animation ──────────────────────────────── */
+  #boot-screen {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: #000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 20;
+    transition: opacity 0.4s ease;
+  }
+  #boot-screen.fade-out {
+    opacity: 0;
+    pointer-events: none;
+  }
+  .boot-logo {
+    font-size: 48px;
+    letter-spacing: 8px;
+    font-weight: 300;
+    margin-bottom: 16px;
+    opacity: 0;
+    animation: bootFadeIn 0.8s ease forwards;
+  }
+  .boot-dots {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    opacity: 0;
+    animation: bootFadeIn 0.4s ease 0.6s forwards;
+  }
+  .boot-dot {
+    width: 8px;
+    height: 8px;
+    background: #33ff33;
+    border-radius: 50%;
+    opacity: 0.2;
+  }
+  .boot-dot:nth-child(1) { animation: dotPulse 1.2s ease-in-out 0.8s infinite; }
+  .boot-dot:nth-child(2) { animation: dotPulse 1.2s ease-in-out 1.0s infinite; }
+  .boot-dot:nth-child(3) { animation: dotPulse 1.2s ease-in-out 1.2s infinite; }
+  .boot-tagline {
+    font-size: 14px;
+    color: #33ff3366;
+    opacity: 0;
+    animation: bootFadeIn 0.5s ease 1.0s forwards;
+  }
+  @keyframes bootFadeIn {
+    to { opacity: 1; }
+  }
+  @keyframes dotPulse {
+    0%, 100% { opacity: 0.2; }
+    50% { opacity: 1; }
+  }
+
+  /* ── Greeting ──────────────────────────────────── */
+  #greeting {
+    font-size: 22px;
+    margin-bottom: 16px;
+    opacity: 0;
+    animation: greetFadeIn 0.5s ease forwards;
+  }
+  @keyframes greetFadeIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── Scroll indicator ──────────────────────────── */
+  .scroll-hint {
+    text-align: center;
+    font-size: 12px;
+    color: #33ff3344;
+    padding: 2px 0;
+    flex-shrink: 0;
+  }
 </style>
 </head>
 <body>
 <div id="app">
   <div id="status">●</div>
   <div id="response-area">
+    <!-- Boot animation -->
+    <div id="boot-screen">
+      <div class="boot-logo">A</div>
+      <div class="boot-dots">
+        <div class="boot-dot"></div>
+        <div class="boot-dot"></div>
+        <div class="boot-dot"></div>
+      </div>
+      <div class="boot-tagline">Hermes Agent</div>
+    </div>
     <!-- Start screen -->
-    <div id="start-screen">
-      <div style="font-size: 22px; margin-bottom: 16px;">Alita</div>
+    <div id="start-screen" style="display: none;">
+      <div id="greeting">Hi, I'm Alita</div>
       <div id="start-options">
         <div class="start-option selected" data-index="0">
           <span class="start-arrow">→</span>
           <span>Continue</span>
         </div>
-        <div class="session-hint" id="session-hint">Loading...</div>
+        <div class="session-hint" id="session-hint"></div>
         <div class="start-option" data-index="1" style="margin-top: 8px;">
           <span class="start-arrow"> </span>
           <span>New conversation</span>
@@ -132,6 +221,7 @@
       <div id="response-text"></div>
     </div>
   </div>
+  <div id="scroll-indicator" class="scroll-hint" style="display: none;">▼ scroll</div>
   <div id="divider"></div>
   <div id="reply-list"></div>
 </div>
@@ -154,7 +244,7 @@ let replies = [];
 let isListening = false;
 let isProcessing = false;
 let conversationHistory = [];
-let mode = 'start'; // 'start' | 'chat'
+let mode = 'boot'; // 'boot' | 'start' | 'chat'
 let startSelectedIndex = 0;
 let sessionInfo = null;
 
@@ -168,6 +258,8 @@ const startScreen = document.getElementById('start-screen');
 const chatScreen = document.getElementById('chat-screen');
 const sessionHint = document.getElementById('session-hint');
 const startOptions = document.querySelectorAll('.start-option');
+const bootScreen = document.getElementById('boot-screen');
+const scrollIndicator = document.getElementById('scroll-indicator');
 
 // ── Init ──────────────────────────────────────────────────
 async function init() {
@@ -175,15 +267,31 @@ async function init() {
     bridge = await waitForEvenAppBridge();
     console.log('Bridge connected');
     bridge.onEvenHubEvent(handleEvent);
-
-    // Fetch session info for "Continue" hint
-    fetchSessionInfo();
   } catch (err) {
     console.error('Bridge init failed:', err);
-    sessionHint.textContent = 'Bridge error — using fallback';
-    // Still allow interaction without bridge
-    renderStartScreen();
   }
+
+  // Run boot sequence
+  runBootSequence();
+}
+
+// ── Boot Sequence ──────────────────────────────────────────────
+async function runBootSequence() {
+  // Show boot animation for 2.5 seconds
+  await new Promise(r => setTimeout(r, 2500));
+
+  // Fade out boot screen
+  bootScreen.classList.add('fade-out');
+
+  // Fetch session info in parallel
+  fetchSessionInfo();
+
+  // Wait for fade out, then show start screen
+  await new Promise(r => setTimeout(r, 500));
+  bootScreen.style.display = 'none';
+  startScreen.style.display = 'block';
+  mode = 'start';
+  updateStartSelection();
 }
 
 // ── Session Info ──────────────────────────────────────────────
@@ -194,24 +302,33 @@ async function fetchSessionInfo() {
       sessionInfo = await res.json();
       if (sessionInfo.lastTopic) {
         sessionHint.textContent = sessionInfo.lastTopic;
-      } else {
-        sessionHint.textContent = 'Previous session available';
       }
-    } else {
-      sessionHint.textContent = '';
     }
   } catch {
-    sessionHint.textContent = '';
+    // Silent fail
   }
 }
 
-// ── Start Screen ──────────────────────────────────────────────
-function renderStartScreen() {
-  mode = 'start';
-  startSelectedIndex = 0;
-  updateStartSelection();
+// ── Scroll Management ──────────────────────────────────────────────
+function checkScroll() {
+  const el = responseArea;
+  if (el.scrollHeight > el.clientHeight) {
+    scrollIndicator.style.display = 'block';
+    // Auto-scroll to bottom on new content
+    el.scrollTop = el.scrollHeight;
+  } else {
+    scrollIndicator.style.display = 'none';
+  }
 }
 
+// Add scroll listener to hide indicator when at bottom
+responseArea.addEventListener('scroll', () => {
+  const el = responseArea;
+  const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 5;
+  scrollIndicator.style.display = atBottom ? 'none' : 'block';
+});
+
+// ── Start Screen ──────────────────────────────────────────────
 function updateStartSelection() {
   startOptions.forEach((el, i) => {
     const arrow = el.querySelector('.start-arrow');
@@ -227,10 +344,8 @@ function updateStartSelection() {
 
 function selectStartOption() {
   if (startSelectedIndex === 0) {
-    // Continue
     startChat(true);
   } else {
-    // New
     startChat(false);
   }
 }
@@ -241,7 +356,7 @@ async function startChat(continueSession) {
   mode = 'chat';
 
   if (continueSession) {
-    responseText.textContent = 'Loading previous context...';
+    responseText.textContent = 'Loading...';
     try {
       const res = await fetch(API_BASE + '/continue');
       if (res.ok) {
@@ -250,7 +365,7 @@ async function startChat(continueSession) {
         if (data.summary) {
           responseText.textContent = data.summary;
         } else {
-          responseText.textContent = 'Ready. What\'s next?';
+          responseText.textContent = 'Ready.';
         }
         if (data.replies) {
           setReplies([
@@ -261,18 +376,19 @@ async function startChat(continueSession) {
           setDefaultReplies();
         }
       } else {
-        responseText.textContent = 'Ready. What\'s next?';
+        responseText.textContent = 'Ready.';
         setDefaultReplies();
       }
-    } catch (err) {
-      responseText.textContent = 'Ready. What\'s next?';
+    } catch {
+      responseText.textContent = 'Ready.';
       setDefaultReplies();
     }
   } else {
-    responseText.textContent = 'New conversation started.';
+    responseText.textContent = 'New conversation.';
     setDefaultReplies();
   }
   renderReplies();
+  checkScroll();
 }
 
 function setDefaultReplies() {
@@ -280,7 +396,7 @@ function setDefaultReplies() {
     { text: '🎤 Speak', action: 'speak' },
     { text: 'What can you do?', action: 'text', value: 'What can you do?' },
     { text: 'What time is it?', action: 'text', value: 'What time is it?' },
-    { text: 'What\'s on my calendar?', action: 'text', value: 'What\'s on my calendar today?' },
+    { text: 'Calendar', action: 'text', value: 'What\'s on my calendar today?' },
     { text: 'Help', action: 'text', value: 'Help me with something' },
   ]);
 }
@@ -292,6 +408,32 @@ function handleEvent(event) {
     return;
   }
 
+  // Scroll events for chat mode
+  if (event.sysEvent) {
+    const { eventType } = event.sysEvent;
+    if (eventType === 'swipe_up') {
+      // If replies are focused, move selection; otherwise scroll response
+      if (document.activeElement === replyList || selectedIndex > 0) {
+        moveSelection(-1);
+      } else {
+        responseArea.scrollTop -= 40;
+      }
+      return;
+    }
+    if (eventType === 'swipe_down') {
+      if (selectedIndex < replies.length - 1) {
+        moveSelection(1);
+      } else {
+        responseArea.scrollTop += 40;
+      }
+      return;
+    }
+    if (eventType === 'tap') {
+      selectReply();
+      return;
+    }
+  }
+
   if (event.listEvent) {
     const { currentSelectItemIndex, eventType } = event.listEvent;
     selectedIndex = currentSelectItemIndex;
@@ -299,12 +441,6 @@ function handleEvent(event) {
     if (eventType === 'click' || eventType === 'tap') {
       selectReply();
     }
-  }
-  if (event.sysEvent) {
-    const { eventType } = event.sysEvent;
-    if (eventType === 'swipe_up') moveSelection(-1);
-    else if (eventType === 'swipe_down') moveSelection(1);
-    else if (eventType === 'tap') selectReply();
   }
 }
 
@@ -397,6 +533,7 @@ async function sendMessage(text) {
   isProcessing = true;
   setStatus('⏳');
   responseText.textContent = 'Thinking...';
+  scrollIndicator.style.display = 'none';
 
   conversationHistory.push({ role: 'user', content: text });
 
@@ -429,6 +566,7 @@ async function sendMessage(text) {
     }
     renderReplies();
     setStatus('●');
+    checkScroll();
   } catch (err) {
     responseText.textContent = 'Error: ' + err.message;
     setStatus('✗');
