@@ -1,4 +1,23 @@
+# Secrets
 .proxy_secret
 .proxy_env
+*.secret
+.env
+.env.*
+
+# Logs
 *.log
+
+# Memory files
 memory.json
+
+# Node
+node_modules/
+package-lock.json
+
+# Build output
+*.ehpk
+
+# OS
+.DS_Store
+Thumbs.db

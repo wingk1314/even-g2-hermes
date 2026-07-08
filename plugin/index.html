@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/png" sizes="24x24" href="icon.png">
+<title>Alita</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, system-ui, sans-serif;
+    background: #000;
+    color: #33ff33;
+    width: 576px;
+    height: 288px;
+    overflow: hidden;
+    font-size: 20px;
+  }
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 12px 16px;
+  }
+  #response-area {
+    flex: 1;
+    overflow-y: auto;
+    line-height: 1.4;
+    font-size: 18px;
+    word-wrap: break-word;
+    padding-bottom: 4px;
+  }
+  #divider {
+    border-top: 1px solid #33ff3344;
+    margin: 4px 0;
+  }
+  #reply-list {
+    flex-shrink: 0;
+  }
+  .reply-item {
+    padding: 4px 8px;
+    font-size: 16px;
+    line-height: 1.3;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .reply-item.selected {
+    background: #33ff3322;
+    border-radius: 4px;
+  }
+  .reply-arrow {
+    color: #33ff33;
+    font-weight: bold;
+    min-width: 16px;
+  }
+  .reply-text {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #status {
+    position: absolute;
+    top: 4px;
+    right: 12px;
+    font-size: 12px;
+    color: #33ff3366;
+  }
+  #listening-overlay {
+    display: none;
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: #000ee;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 12px;
+    z-index: 10;
+  }
+  #listening-overlay.active { display: flex; }
+  .pulse {
+    font-size: 48px;
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.4; transform: scale(0.95); }
+    50% { opacity: 1; transform: scale(1.1); }
+  }
+  .start-option {
+    padding: 12px 16px;
+    font-size: 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .start-option.selected {
+    background: #33ff3322;
+    border-radius: 6px;
+  }
+  .start-arrow { font-weight: bold; min-width: 20px; }
+  .session-hint {
+    font-size: 13px;
+    color: #33ff3388;
+    margin-top: 4px;
+    padding-left: 32px;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="status">●</div>
+  <div id="response-area">
+    <!-- Start screen -->
+    <div id="start-screen">
+      <div style="font-size: 22px; margin-bottom: 16px;">Alita</div>
+      <div id="start-options">
+        <div class="start-option selected" data-index="0">
+          <span class="start-arrow">→</span>
+          <span>Continue</span>
+        </div>
+        <div class="session-hint" id="session-hint">Loading...</div>
+        <div class="start-option" data-index="1" style="margin-top: 8px;">
+          <span class="start-arrow"> </span>
+          <span>New conversation</span>
+        </div>
+      </div>
+    </div>
+    <!-- Chat screen (hidden initially) -->
+    <div id="chat-screen" style="display: none;">
+      <div id="response-text"></div>
+    </div>
+  </div>
+  <div id="divider"></div>
+  <div id="reply-list"></div>
+</div>
+<div id="listening-overlay">
+  <div class="pulse">🎤</div>
+  <div style="color: #33ff33; font-size: 18px;">Listening...</div>
+</div>
+
+<script type="module">
+import { waitForEvenAppBridge, AudioInputSource } from './node_modules/@evenrealities/even_hub_sdk/dist/index.js';
+
+// ── Config ──────────────────────────────────────────────────
+const API_BASE = 'http://192.168.0.203:9191';
+const DISPLAY_MAX_CHARS = 400;
+
+// ── State ──────────────────────────────────────────────────
+let bridge = null;
+let selectedIndex = 0;
+let replies = [];
+let isListening = false;
+let isProcessing = false;
+let conversationHistory = [];
+let mode = 'start'; // 'start' | 'chat'
+let startSelectedIndex = 0;
+let sessionInfo = null;
+
+// ── DOM ──────────────────────────────────────────────────
+const responseArea = document.getElementById('response-area');
+const responseText = document.getElementById('response-text');
+const replyList = document.getElementById('reply-list');
+const statusEl = document.getElementById('status');
+const listenOverlay = document.getElementById('listening-overlay');
+const startScreen = document.getElementById('start-screen');
+const chatScreen = document.getElementById('chat-screen');
+const sessionHint = document.getElementById('session-hint');
+const startOptions = document.querySelectorAll('.start-option');
+
+// ── Init ──────────────────────────────────────────────────
+async function init() {
+  try {
+    bridge = await waitForEvenAppBridge();
+    console.log('Bridge connected');
+    bridge.onEvenHubEvent(handleEvent);
+
+    // Fetch session info for "Continue" hint
+    fetchSessionInfo();
+  } catch (err) {
+    console.error('Bridge init failed:', err);
+    sessionHint.textContent = 'Bridge error — using fallback';
+    // Still allow interaction without bridge
+    renderStartScreen();
+  }
+}
+
+// ── Session Info ──────────────────────────────────────────────
+async function fetchSessionInfo() {
+  try {
+    const res = await fetch(API_BASE + '/session-info');
+    if (res.ok) {
+      sessionInfo = await res.json();
+      if (sessionInfo.lastTopic) {
+        sessionHint.textContent = sessionInfo.lastTopic;
+      } else {
+        sessionHint.textContent = 'Previous session available';
+      }
+    } else {
+      sessionHint.textContent = '';
+    }
+  } catch {
+    sessionHint.textContent = '';
+  }
+}
+
+// ── Start Screen ──────────────────────────────────────────────
+function renderStartScreen() {
+  mode = 'start';
+  startSelectedIndex = 0;
+  updateStartSelection();
+}
+
+function updateStartSelection() {
+  startOptions.forEach((el, i) => {
+    const arrow = el.querySelector('.start-arrow');
+    if (i === startSelectedIndex) {
+      el.classList.add('selected');
+      arrow.textContent = '→';
+    } else {
+      el.classList.remove('selected');
+      arrow.textContent = ' ';
+    }
+  });
+}
+
+function selectStartOption() {
+  if (startSelectedIndex === 0) {
+    // Continue
+    startChat(true);
+  } else {
+    // New
+    startChat(false);
+  }
+}
+
+async function startChat(continueSession) {
+  startScreen.style.display = 'none';
+  chatScreen.style.display = 'block';
+  mode = 'chat';
+
+  if (continueSession) {
+    responseText.textContent = 'Loading previous context...';
+    try {
+      const res = await fetch(API_BASE + '/continue');
+      if (res.ok) {
+        const data = await res.json();
+        conversationHistory = data.history || [];
+        if (data.summary) {
+          responseText.textContent = data.summary;
+        } else {
+          responseText.textContent = 'Ready. What\'s next?';
+        }
+        if (data.replies) {
+          setReplies([
+            { text: '🎤 Speak', action: 'speak' },
+            ...data.replies.map(r => ({ text: r, action: 'text', value: r })),
+          ]);
+        } else {
+          setDefaultReplies();
+        }
+      } else {
+        responseText.textContent = 'Ready. What\'s next?';
+        setDefaultReplies();
+      }
+    } catch (err) {
+      responseText.textContent = 'Ready. What\'s next?';
+      setDefaultReplies();
+    }
+  } else {
+    responseText.textContent = 'New conversation started.';
+    setDefaultReplies();
+  }
+  renderReplies();
+}
+
+function setDefaultReplies() {
+  setReplies([
+    { text: '🎤 Speak', action: 'speak' },
+    { text: 'What can you do?', action: 'text', value: 'What can you do?' },
+    { text: 'What time is it?', action: 'text', value: 'What time is it?' },
+    { text: 'What\'s on my calendar?', action: 'text', value: 'What\'s on my calendar today?' },
+    { text: 'Help', action: 'text', value: 'Help me with something' },
+  ]);
+}
+
+// ── Event Handler ──────────────────────────────────────────────
+function handleEvent(event) {
+  if (mode === 'start') {
+    handleStartEvent(event);
+    return;
+  }
+
+  if (event.listEvent) {
+    const { currentSelectItemIndex, eventType } = event.listEvent;
+    selectedIndex = currentSelectItemIndex;
+    renderReplies();
+    if (eventType === 'click' || eventType === 'tap') {
+      selectReply();
+    }
+  }
+  if (event.sysEvent) {
+    const { eventType } = event.sysEvent;
+    if (eventType === 'swipe_up') moveSelection(-1);
+    else if (eventType === 'swipe_down') moveSelection(1);
+    else if (eventType === 'tap') selectReply();
+  }
+}
+
+function handleStartEvent(event) {
+  if (event.listEvent) {
+    const { currentSelectItemIndex, eventType } = event.listEvent;
+    startSelectedIndex = currentSelectItemIndex;
+    updateStartSelection();
+    if (eventType === 'click' || eventType === 'tap') selectStartOption();
+  }
+  if (event.sysEvent) {
+    const { eventType } = event.sysEvent;
+    if (eventType === 'swipe_up') {
+      startSelectedIndex = Math.max(0, startSelectedIndex - 1);
+      updateStartSelection();
+    } else if (eventType === 'swipe_down') {
+      startSelectedIndex = Math.min(1, startSelectedIndex + 1);
+      updateStartSelection();
+    } else if (eventType === 'tap') {
+      selectStartOption();
+    }
+  }
+}
+
+// ── Navigation ──────────────────────────────────────────────
+function moveSelection(dir) {
+  if (isProcessing) return;
+  selectedIndex = Math.max(0, Math.min(replies.length - 1, selectedIndex + dir));
+  renderReplies();
+}
+
+function selectReply() {
+  if (isProcessing) return;
+  const reply = replies[selectedIndex];
+  if (!reply) return;
+
+  if (reply.action === 'speak') {
+    startListening();
+  } else if (reply.action === 'text') {
+    sendMessage(reply.value || reply.text);
+  }
+}
+
+// ── Voice Input ──────────────────────────────────────────────
+async function startListening() {
+  if (isListening) return;
+  isListening = true;
+  listenOverlay.classList.add('active');
+
+  try {
+    await bridge.audioControl(true, AudioInputSource.Glasses);
+
+    const audioChunks = [];
+    const unsubscribe = bridge.onEvenHubEvent((event) => {
+      if (event.audioEvent && event.audioEvent.audioPcm) {
+        audioChunks.push(event.audioEvent.audioPcm);
+      }
+    });
+
+    setTimeout(async () => {
+      unsubscribe();
+      await bridge.audioControl(false);
+      isListening = false;
+      listenOverlay.classList.remove('active');
+
+      if (audioChunks.length > 0) {
+        const totalLength = audioChunks.reduce((sum, c) => sum + c.length, 0);
+        const audioData = new Uint8Array(totalLength);
+        let offset = 0;
+        for (const chunk of audioChunks) {
+          audioData.set(chunk, offset);
+          offset += chunk.length;
+        }
+        sendAudio(audioData);
+      } else {
+        setStatus('No audio');
+      }
+    }, 10000);
+  } catch (err) {
+    console.error('Audio error:', err);
+    isListening = false;
+    listenOverlay.classList.remove('active');
+    setStatus('MIC error');
+  }
+}
+
+// ── API Calls ──────────────────────────────────────────────
+async function sendMessage(text) {
+  if (isProcessing) return;
+  isProcessing = true;
+  setStatus('⏳');
+  responseText.textContent = 'Thinking...';
+
+  conversationHistory.push({ role: 'user', content: text });
+
+  try {
+    const res = await fetch(API_BASE + '/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: text,
+        history: conversationHistory.slice(-10),
+      }),
+    });
+
+    if (!res.ok) throw new Error('API ' + res.status);
+    const data = await res.json();
+
+    conversationHistory.push({ role: 'assistant', content: data.response });
+
+    let display = data.response;
+    if (display.length > DISPLAY_MAX_CHARS) display = display.slice(0, DISPLAY_MAX_CHARS) + '...';
+    responseText.textContent = display;
+
+    if (data.replies && data.replies.length > 0) {
+      setReplies([
+        { text: '🎤 Speak', action: 'speak' },
+        ...data.replies.map(r => ({ text: r, action: 'text', value: r })),
+      ]);
+    } else {
+      setDefaultReplies();
+    }
+    renderReplies();
+    setStatus('●');
+  } catch (err) {
+    responseText.textContent = 'Error: ' + err.message;
+    setStatus('✗');
+  } finally {
+    isProcessing = false;
+  }
+}
+
+async function sendAudio(audioData) {
+  if (isProcessing) return;
+  isProcessing = true;
+  setStatus('⏳');
+
+  try {
+    const res = await fetch(API_BASE + '/transcribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: audioData,
+    });
+    if (!res.ok) throw new Error('Transcribe ' + res.status);
+    const data = await res.json();
+    if (data.text) {
+      sendMessage(data.text);
+    } else {
+      setStatus('No speech');
+      isProcessing = false;
+    }
+  } catch (err) {
+    setStatus('✗');
+    isProcessing = false;
+  }
+}
+
+// ── Rendering ──────────────────────────────────────────────
+function setReplies(newReplies) {
+  replies = newReplies.slice(0, 6);
+  selectedIndex = 0;
+}
+
+function renderReplies() {
+  replyList.innerHTML = replies.map((r, i) =>
+    `<div class="reply-item ${i === selectedIndex ? 'selected' : ''}">
+      <span class="reply-arrow">${i === selectedIndex ? '→' : ' '}</span>
+      <span class="reply-text">${r.text}</span>
+    </div>`
+  ).join('');
+
+  if (bridge) {
+    const listContent = replies.map((r, i) =>
+      (i === selectedIndex ? '→ ' : '  ') + r.text
+    ).join('\n');
+    bridge.textContainerUpgrade({
+      containerID: 1,
+      containerName: 'reply-list',
+      content: listContent,
+    }).catch(() => {});
+  }
+}
+
+function setStatus(text) {
+  statusEl.textContent = text;
+}
+
+// ── Bootstrap ──────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
