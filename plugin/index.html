@@ -18,15 +18,12 @@ const API_BASE = 'http://192.168.0.203:9191';
 const MAX = 280;
 
 let bridge = null, ready = false, mode = 'boot';
-let replies = [], selIdx = 0, processing = false;
+let selIdx = 0, startSel = 0, replies = [], processing = false;
 let history = [], sessionInfo = null;
 
-function log(m) { console.log('[Alita]', m); }
 function trunc(s) { return (s || '').length > MAX ? s.slice(0, MAX) + '...' : s || ''; }
 
-// ── Glasses: Create initial layout ──────────────────────────────
-// 3 text containers: header, body, footer
-// Start with no event capture — we'll rebuild per screen
+// ── Display: 3 text containers, event capture on container 3 ──
 async function createDisplay() {
   if (!bridge) return;
   try {
@@ -42,109 +39,76 @@ async function createDisplay() {
       ],
     });
     ready = r === StartUpPageCreateResult.success;
-    log('Display: ' + (ready ? 'OK' : 'FAIL'));
-  } catch (e) { log('Display err: ' + e.message); }
+  } catch (e) { console.error('createDisplay', e); }
 }
 
-// Update text in a container
 async function set(id, name, text) {
   if (!bridge || !ready) return;
   try { await bridge.textContainerUpgrade({ containerID: id, containerName: name, content: text }); }
   catch {}
 }
 
-// Rebuild page — only call on major screen transitions
-async function rebuild(layout) {
-  if (!bridge) return;
-  try { await bridge.rebuildPageContainer(layout); ready = true; }
-  catch (e) { log('rebuild err: ' + e.message); }
-}
-
-// ── Screen layouts ──────────────────────────────────────────────
-
-// Start screen: list for Continue/New in body, events on body
-function layoutStart() {
-  return {
-    containerTotalNum: 3,
-    textObject: [
-      { xPosition: 16, yPosition: 8, width: 544, height: 32,
-        containerID: 1, containerName: 'hdr', content: "Hi, I'm Alita", isEventCapture: 0 },
-      { xPosition: 16, yPosition: 224, width: 544, height: 56,
-        containerID: 3, containerName: 'ftr', content: '', isEventCapture: 0 },
-    ],
-    listObject: [
-      { xPosition: 16, yPosition: 48, width: 544, height: 168,
-        containerID: 2, containerName: 'body',
-        itemContainer: { itemCount: 2, itemName: ['Continue', 'New conversation'] },
-        isEventCapture: 1 },
-    ],
-  };
-}
-
-// Chat screen: text body + list footer, events on footer
-function layoutChat() {
-  const names = replies.length > 0 ? replies.map(r => r.text) : [''];
-  return {
-    containerTotalNum: 3,
-    textObject: [
-      { xPosition: 16, yPosition: 8, width: 544, height: 32,
-        containerID: 1, containerName: 'hdr', content: 'Alita', isEventCapture: 0 },
-      { xPosition: 16, yPosition: 48, width: 544, height: 168,
-        containerID: 2, containerName: 'body', content: '', isEventCapture: 0 },
-    ],
-    listObject: [
-      { xPosition: 16, yPosition: 224, width: 544, height: 56,
-        containerID: 3, containerName: 'ftr',
-        itemContainer: { itemCount: Math.max(1, names.length), itemName: names },
-        isEventCapture: 1 },
-    ],
-  };
-}
-
 // ── Init ──────────────────────────────────────────────────
 async function init() {
   try {
     bridge = await waitForEvenAppBridge();
-    log('Bridge OK');
     bridge.onEvenHubEvent(onEvent);
     await createDisplay();
     await boot();
-  } catch (e) { log('Init err: ' + e.message); }
+  } catch (e) {
+    // No bridge — still try to show something
+    console.error('init', e);
+  }
 }
 
-// ── Boot sequence ──────────────────────────────────────────────
+// ── Boot ──────────────────────────────────────────────────
 async function boot() {
   mode = 'boot';
-  if (ready) {
-    await set(1, 'hdr', 'Alita');
-    await set(2, 'body', 'Starting.');
-    await sleep(700);
-    await set(2, 'body', 'Starting..');
-    await sleep(700);
-    await set(2, 'body', 'Starting...');
-    await sleep(500);
-  }
+  await set(1, 'hdr', 'Alita');
+  await set(2, 'body', 'Starting.');
+  await set(3, 'ftr', '');
+  await sleep(800);
+  await set(2, 'body', 'Starting..');
+  await sleep(800);
+  await set(2, 'body', 'Starting...');
+  await sleep(600);
+
   // Fetch session info
   try { const r = await fetch(API_BASE + '/session-info'); if (r.ok) sessionInfo = await r.json(); } catch {}
+
   showStart();
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// ── Start screen ──────────────────────────────────────────────
-async function showStart() {
+// ── Start Screen ──────────────────────────────────────────
+function showStart() {
   mode = 'start';
-  await rebuild(layoutStart());
+  startSel = 0;
+  renderStart();
+}
+
+function renderStart() {
+  set(1, 'hdr', "Hi, I'm Alita");
+  const hint = sessionInfo?.lastTopic ? '(' + sessionInfo.lastTopic.slice(0, 30) + ')' : '';
+  const lines = [
+    startSel === 0 ? '> Continue' : '  Continue',
+    hint ? '  ' + hint : '',
+    '',
+    startSel === 1 ? '> New conversation' : '  New conversation',
+  ].join('\n');
+  set(2, 'body', lines);
+  set(3, 'ftr', 'tap to select');
 }
 
 // ── Chat ──────────────────────────────────────────────────
 async function startChat(continued) {
   mode = 'chat';
+  selIdx = 0;
 
-  // First rebuild to chat layout (clears list events during load)
-  replies = [{ text: '...', action: 'wait' }];
-  await rebuild(layoutChat());
+  await set(1, 'hdr', 'Alita');
   await set(2, 'body', 'Loading...');
+  await set(3, 'ftr', '');
 
   if (continued) {
     try {
@@ -164,15 +128,14 @@ async function startChat(continued) {
     defaultReplies();
   }
 
-  selIdx = 0;
-  await rebuild(layoutChat());
+  renderReplies();
 }
 
 function defaultReplies() {
   replies = [
     { text: 'Speak', action: 'speak' },
     { text: 'What can you do?', action: 'text', value: 'What can you do?' },
-    { text: 'Time', action: 'text', value: 'What time is it?' },
+    { text: 'What time is it?', action: 'text', value: 'What time is it?' },
     { text: 'Calendar', action: 'text', value: "What's on my calendar?" },
     { text: 'Help', action: 'text', value: 'Help me' },
   ];
@@ -185,36 +148,45 @@ function makeReplies(data) {
   selIdx = 0;
 }
 
-// ── Events ──────────────────────────────────────────────────
-let lastListEventTime = 0;
-let listDebounceTimer = null;
+function renderReplies() {
+  const lines = replies.map((r, i) =>
+    (i === selIdx ? '> ' : '  ') + r.text
+  ).join('\n');
+  set(3, 'ftr', lines);
+}
 
+// ── Events ──────────────────────────────────────────────────
 function onEvent(event) {
-  // List events = navigation AND selection
-  // Swipe fires rapid listEvents; tap fires a single one
-  // Debounce: wait 400ms after last event, then trigger
+  // ANY event from the bridge = user interaction
+  // For start screen: swipe changes selection, any event triggers after debounce
+  // For chat screen: same for replies
+
   if (event.listEvent) {
     const idx = event.listEvent.currentSelectItemIndex;
-    if (typeof idx === 'number' && idx >= 0) {
-      if (mode === 'start') startSelectedIndex = idx;
-      else if (mode === 'chat') selIdx = idx;
-
-      // Clear previous debounce
-      if (listDebounceTimer) clearTimeout(listDebounceTimer);
-
-      // Debounce: if no more listEvents within 400ms, treat as tap
-      listDebounceTimer = setTimeout(() => {
-        if (mode === 'start') startChat(startSelectedIndex === 0);
-        else if (mode === 'chat') doSelect();
-      }, 400);
+    if (typeof idx === 'number') {
+      if (mode === 'start') { startSel = idx; renderStart(); }
+      else if (mode === 'chat') { selIdx = idx; renderReplies(); }
     }
     return;
   }
 
-  // System events (backup — may not fire for list containers)
+  // sysEvent = tap/press on touchpad or ring
   if (event.sysEvent) {
-    if (mode === 'start') startChat(startSelectedIndex === 0);
-    else if (mode === 'chat') doSelect();
+    if (mode === 'start') {
+      startChat(startSel === 0);
+    } else if (mode === 'chat') {
+      doSelect();
+    }
+    return;
+  }
+
+  // textEvent = tap on text container
+  if (event.textEvent) {
+    if (mode === 'start') {
+      startChat(startSel === 0);
+    } else if (mode === 'chat') {
+      doSelect();
+    }
   }
 }
 
@@ -252,7 +224,6 @@ async function sendMsg(text) {
   processing = true;
   await set(2, 'body', 'Thinking...');
   history.push({ role: 'user', content: text });
-
   try {
     const r = await fetch(API_BASE + '/chat', {
       method: 'POST',
@@ -264,11 +235,9 @@ async function sendMsg(text) {
     history.push({ role: 'assistant', content: d.response });
     await set(2, 'body', trunc(d.response));
     makeReplies(d.replies);
-    selIdx = 0;
-    await rebuild(layoutChat());
-  } catch (e) {
-    await set(2, 'body', 'Error: ' + e.message);
-  } finally { processing = false; }
+    renderReplies();
+  } catch (e) { await set(2, 'body', 'Error: ' + e.message); }
+  finally { processing = false; }
 }
 
 async function sendAudio(data) {
