@@ -20,6 +20,7 @@ const MAX = 400;
 let bridge = null, ready = false, mode = 'boot';
 let selIdx = 0, replies = [], processing = false;
 let history = [], sessionInfo = null;
+let lastBody = 'Ready.';
 
 function trunc(s) { return (s || '').length > MAX ? s.slice(0, MAX) + '...' : s || ''; }
 
@@ -59,7 +60,7 @@ function startLayout() {
 }
 
 // Chat screen: header + body text + reply list
-function chatLayout() {
+function chatLayout(bodyText) {
   const names = replies.length ? replies.map(r => r.text) : [''];
   return {
     containerTotalNum: 3,
@@ -67,14 +68,14 @@ function chatLayout() {
       { xPosition: 16, yPosition: 8, width: 544, height: 32,
         containerID: 1, containerName: 'hdr', content: 'Alita', isEventCapture: 0 },
       { xPosition: 16, yPosition: 44, width: 544, height: 140,
-        containerID: 2, containerName: 'body', content: '', isEventCapture: 0 },
+        containerID: 2, containerName: 'body', content: bodyText || '', isEventCapture: 0 },
     ],
     listObject: [{
       xPosition: 16, yPosition: 188, width: 544, height: 92,
       containerID: 3, containerName: 'replies',
       itemContainer: { itemCount: Math.max(1, names.length), itemName: names },
       isEventCapture: 1,
-    }],
+    ],
   };
 }
 
@@ -122,10 +123,10 @@ async function startChat(continued) {
   mode = 'chat';
   selIdx = 0;
 
-  // Build chat layout first
+  // Build chat layout with loading message
   replies = [{ text: '...', action: 'wait' }];
-  await rebuild(chatLayout());
-  await setText(2, 'body', 'Loading...');
+  lastBody = 'Loading...';
+  await rebuild(chatLayout(lastBody));
 
   if (continued) {
     try {
@@ -133,18 +134,18 @@ async function startChat(continued) {
       if (r.ok) {
         const d = await r.json();
         history = d.history || [];
-        await setText(2, 'body', trunc(d.summary || 'Ready.'));
+        lastBody = trunc(d.summary || 'Ready.');
         makeReplies(d.replies);
-      } else { await setText(2, 'body', 'Ready.'); defaultReplies(); }
-    } catch { await setText(2, 'body', 'Ready.'); defaultReplies(); }
+      } else { lastBody = 'Ready.'; defaultReplies(); }
+    } catch { lastBody = 'Ready.'; defaultReplies(); }
   } else {
-    await setText(2, 'body', 'New conversation.');
+    lastBody = 'New conversation.';
     defaultReplies();
   }
 
-  // Rebuild to show replies
+  // Rebuild with body + replies
   selIdx = 0;
-  await rebuild(chatLayout());
+  await rebuild(chatLayout(lastBody));
 }
 
 function defaultReplies() {
@@ -220,7 +221,8 @@ async function listen() {
 async function sendMsg(text) {
   if (processing) return;
   processing = true;
-  await setText(2, 'body', 'Thinking...');
+  lastBody = 'Thinking...';
+  await rebuild(chatLayout(lastBody));
   history.push({ role: 'user', content: text });
   try {
     const r = await fetch(API_BASE + '/chat', {
@@ -231,11 +233,11 @@ async function sendMsg(text) {
     if (!r.ok) throw new Error('API ' + r.status);
     const d = await r.json();
     history.push({ role: 'assistant', content: d.response });
-    await setText(2, 'body', trunc(d.response));
+    lastBody = trunc(d.response);
     makeReplies(d.replies);
     selIdx = 0;
-    await rebuild(chatLayout());
-  } catch (e) { await setText(2, 'body', 'Error: ' + e.message); }
+    await rebuild(chatLayout(lastBody));
+  } catch (e) { lastBody = 'Error: ' + e.message; await rebuild(chatLayout(lastBody)); }
   finally { processing = false; }
 }
 
