@@ -6,31 +6,10 @@
 <link rel="icon" type="image/png" sizes="24x24" href="icon.png">
 <title>Alita</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: -apple-system, system-ui, sans-serif;
-    background: #111;
-    color: #33ff33;
-    width: 576px;
-    height: 288px;
-    overflow: hidden;
-  }
-  #debug {
-    position: absolute;
-    bottom: 4px;
-    left: 12px;
-    font-size: 11px;
-    color: #33ff3344;
-    max-width: 90%;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
+  body { display: none; }
 </style>
 </head>
 <body>
-<div id="debug">Init...</div>
-
 <script type="module">
 import {
   waitForEvenAppBridge,
@@ -43,11 +22,10 @@ const API_BASE = 'http://192.168.0.203:9191';
 const MAX_CHARS = 280;
 
 // Glasses: 576 x 288
-// header (36px) + response (180px) + replies (64px)
 const LAYOUT = {
   header:   { x: 16, y: 8,   w: 544, h: 32 },
-  response: { x: 16, y: 48,  w: 544, h: 172 },
-  replies:  { x: 16, y: 224, w: 544, h: 56 },
+  response: { x: 16, y: 48,  w: 544, h: 168 },
+  replies:  { x: 16, y: 220, w: 544, h: 60 },
 };
 
 // ── State ──────────────────────────────────────────────────
@@ -56,98 +34,117 @@ let glassesReady = false;
 let mode = 'boot'; // boot | start | chat
 let selectedIndex = 0;
 let startSelectedIndex = 0;
-let replies = [];
+let replies = []; // { text, action, value? }
 let isProcessing = false;
 let conversationHistory = [];
 let sessionInfo = null;
 
-const $ = id => document.getElementById(id);
-function log(msg) { console.log('[Alita]', msg); $('debug').textContent = msg; }
+function log(msg) { console.log('[Alita]', msg); }
 
-// ── Glasses: Build Layout ──────────────────────────────────────
-// Which container gets isEventCapture depends on current screen
+// ── Glasses Display ──────────────────────────────────────────────
 
-function buildContainers(eventContainer) {
+// Start screen: response captures events (for Continue/New selection)
+function startScreenContainers() {
   return {
     containerTotalNum: 3,
     textObject: [
       {
-        xPosition: LAYOUT.header.x,
-        yPosition: LAYOUT.header.y,
-        width: LAYOUT.header.w,
-        height: LAYOUT.header.h,
-        containerID: 1,
-        containerName: 'header',
-        content: '',
-        isEventCapture: eventContainer === 1 ? 1 : 0,
+        xPosition: LAYOUT.header.x, yPosition: LAYOUT.header.y,
+        width: LAYOUT.header.w, height: LAYOUT.header.h,
+        containerID: 1, containerName: 'header',
+        content: '', isEventCapture: 0,
       },
       {
-        xPosition: LAYOUT.response.x,
-        yPosition: LAYOUT.response.y,
-        width: LAYOUT.response.w,
-        height: LAYOUT.response.h,
-        containerID: 2,
-        containerName: 'response',
-        content: '',
-        isEventCapture: eventContainer === 2 ? 1 : 0,
+        xPosition: LAYOUT.response.x, yPosition: LAYOUT.response.y,
+        width: LAYOUT.response.w, height: LAYOUT.response.h,
+        containerID: 2, containerName: 'response',
+        content: '', isEventCapture: 1, // captures swipe/tap for selection
       },
+    ],
+    listObject: [
       {
-        xPosition: LAYOUT.replies.x,
-        yPosition: LAYOUT.replies.y,
-        width: LAYOUT.replies.w,
-        height: LAYOUT.replies.h,
-        containerID: 3,
-        containerName: 'replies',
-        content: '',
-        isEventCapture: eventContainer === 3 ? 1 : 0,
+        xPosition: LAYOUT.replies.x, yPosition: LAYOUT.replies.y,
+        width: LAYOUT.replies.w, height: LAYOUT.replies.h,
+        containerID: 3, containerName: 'replies',
+        itemContainer: { itemCount: 1, itemName: [''] },
+        isEventCapture: 0,
       },
     ],
   };
 }
 
-async function rebuildDisplay(eventContainer) {
-  if (!bridge) return false;
-  try {
-    const result = await bridge.rebuildPageContainer(buildContainers(eventContainer));
-    glassesReady = result === true || result === StartUpPageCreateResult.success;
-    log('Rebuild (events→' + eventContainer + '): ' + (glassesReady ? 'OK' : 'FAIL'));
-    return glassesReady;
-  } catch (err) {
-    log('Rebuild error: ' + err.message);
-    return false;
-  }
+// Chat screen: list container captures events (built-in selection)
+function chatScreenContainers(numReplies) {
+  return {
+    containerTotalNum: 3,
+    textObject: [
+      {
+        xPosition: LAYOUT.header.x, yPosition: LAYOUT.header.y,
+        width: LAYOUT.header.w, height: LAYOUT.header.h,
+        containerID: 1, containerName: 'header',
+        content: '', isEventCapture: 0,
+      },
+      {
+        xPosition: LAYOUT.response.x, yPosition: LAYOUT.response.y,
+        width: LAYOUT.response.w, height: LAYOUT.response.h,
+        containerID: 2, containerName: 'response',
+        content: '', isEventCapture: 0,
+      },
+    ],
+    listObject: [
+      {
+        xPosition: LAYOUT.replies.x, yPosition: LAYOUT.replies.y,
+        width: LAYOUT.replies.w, height: LAYOUT.replies.h,
+        containerID: 3, containerName: 'replies',
+        itemContainer: {
+          itemCount: Math.max(1, numReplies),
+          itemName: replies.map(r => r.text) || [''],
+        },
+        isEventCapture: 1, // list handles swipe navigation natively
+      },
+    ],
+  };
 }
 
-async function initGlassesDisplay() {
-  if (!bridge) return false;
+async function rebuildForStart() {
+  if (!bridge) return;
   try {
-    const result = await bridge.createStartUpPageContainer(buildContainers(3));
-    glassesReady = result === StartUpPageCreateResult.success;
-    log('Glasses init: ' + (glassesReady ? 'OK' : 'FAIL'));
-    return glassesReady;
-  } catch (err) {
-    log('Init error: ' + err.message);
-    return false;
-  }
+    await bridge.rebuildPageContainer(startScreenContainers());
+    glassesReady = true;
+  } catch (e) { log('rebuild start: ' + e.message); }
 }
 
-// ── Glasses: Update Helpers ──────────────────────────────────────
-async function push(containerID, containerName, content) {
+async function rebuildForChat() {
+  if (!bridge) return;
+  try {
+    await bridge.rebuildPageContainer(chatScreenContainers(replies.length));
+    glassesReady = true;
+  } catch (e) { log('rebuild chat: ' + e.message); }
+}
+
+async function initGlasses() {
+  if (!bridge) return;
+  try {
+    const r = await bridge.createStartUpPageContainer(startScreenContainers());
+    glassesReady = r === StartUpPageCreateResult.success;
+    log('Glasses: ' + (glassesReady ? 'OK' : 'FAIL'));
+  } catch (e) { log('init error: ' + e.message); }
+}
+
+async function push(id, name, content) {
+  if (!bridge || !glassesReady) return;
+  try { await bridge.textContainerUpgrade({ containerID: id, containerName: name, content }); }
+  catch (e) { log('push: ' + name); }
+}
+
+async function pushHeader(t) { await push(1, 'header', t); }
+async function pushResponse(t) { await push(2, 'response', t); }
+
+async function pushReplyList() {
   if (!bridge || !glassesReady) return;
   try {
-    await bridge.textContainerUpgrade({ containerID, containerName, content });
-  } catch (e) {
-    log('Push error: ' + containerName);
-  }
-}
-
-async function pushHeader(text) { await push(1, 'header', text); }
-async function pushResponse(text) { await push(2, 'response', text); }
-async function pushReplies() {
-  const lines = replies.map((r, i) =>
-    (i === selectedIndex ? '> ' : '  ') + r.text
-  ).join('\n');
-  await push(3, 'replies', lines);
+    await bridge.rebuildPageContainer(chatScreenContainers(replies.length));
+  } catch (e) { log('rebuild replies: ' + e.message); }
 }
 
 // ── Init ──────────────────────────────────────────────────
@@ -156,11 +153,10 @@ async function init() {
     bridge = await waitForEvenAppBridge();
     log('Bridge OK');
     bridge.onEvenHubEvent(handleEvent);
-    await initGlassesDisplay();
+    await initGlasses();
     await bootSequence();
-  } catch (err) {
-    log('Bridge fail: ' + err.message);
-    await bootSequence();
+  } catch (e) {
+    log('Bridge fail: ' + e.message);
   }
 }
 
@@ -169,20 +165,17 @@ async function bootSequence() {
   mode = 'boot';
   if (glassesReady) {
     await pushHeader('Alita');
-    await pushResponse('Starting');
-    await new Promise(r => setTimeout(r, 700));
     await pushResponse('Starting.');
-    await new Promise(r => setTimeout(r, 700));
+    await new Promise(r => setTimeout(r, 800));
     await pushResponse('Starting..');
-    await new Promise(r => setTimeout(r, 700));
+    await new Promise(r => setTimeout(r, 800));
     await pushResponse('Starting...');
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise(r => setTimeout(r, 600));
   }
   await fetchSessionInfo();
   showStartScreen();
 }
 
-// ── Session Info ──────────────────────────────────────────────
 async function fetchSessionInfo() {
   try {
     const res = await fetch(API_BASE + '/session-info');
@@ -191,19 +184,14 @@ async function fetchSessionInfo() {
 }
 
 // ── Start Screen ──────────────────────────────────────────────
-// Events go to container 2 (response area) where choices are
 async function showStartScreen() {
   mode = 'start';
   startSelectedIndex = 0;
-
-  if (glassesReady) {
-    // Rebuild so container 2 captures events
-    await rebuildDisplay(2);
-    renderStartScreen();
-  }
+  await rebuildForStart();
+  renderStart();
 }
 
-async function renderStartScreen() {
+async function renderStart() {
   const hint = sessionInfo?.lastTopic || '';
   const lines = [
     "Hi, I'm Alita",
@@ -216,85 +204,93 @@ async function renderStartScreen() {
 
   await pushHeader('Alita');
   await pushResponse(lines);
-  await push(3, 'replies', ''); // clear replies
 }
 
-// ── Chat ──────────────────────────────────────────────────────
+// ── Chat ──────────────────────────────────────────────────
 async function startChat(continueSession) {
   mode = 'chat';
 
-  // Rebuild so container 3 (replies) captures events
-  if (glassesReady) {
-    await rebuildDisplay(3);
-    await pushHeader('Alita');
-    await pushResponse('Loading...');
-    await pushReplies();
-  }
-
   if (continueSession) {
+    await pushResponse('Loading...');
     try {
       const res = await fetch(API_BASE + '/continue');
       if (res.ok) {
-        const data = await res.json();
-        conversationHistory = data.history || [];
-        await showText(data.summary || 'Ready.');
-        setRepliesFromData(data.replies);
+        const d = await res.json();
+        conversationHistory = d.history || [];
+        await showText(d.summary || 'Ready.');
+        loadReplies(d.replies);
       } else {
         await showText('Ready.');
-        setDefaultReplies();
+        defaultReplies();
       }
     } catch {
       await showText('Ready.');
-      setDefaultReplies();
+      defaultReplies();
     }
   } else {
     await showText('New conversation.');
-    setDefaultReplies();
+    defaultReplies();
   }
-  await pushReplies();
+
+  // Build list container with replies
+  await pushReplyList();
 }
 
-function setDefaultReplies() {
-  setReplies([
+function defaultReplies() {
+  replies = [
     { text: 'Speak', action: 'speak' },
     { text: 'What can you do?', action: 'text', value: 'What can you do?' },
     { text: 'What time is it?', action: 'text', value: 'What time is it?' },
-    { text: 'Calendar', action: 'text', value: "What's on my calendar today?" },
+    { text: 'Calendar', action: 'text', value: "What's on my calendar?" },
     { text: 'Help', action: 'text', value: 'Help me with something' },
-  ]);
+  ];
+  selectedIndex = 0;
 }
 
-function setRepliesFromData(dataReplies) {
-  if (dataReplies && dataReplies.length > 0) {
-    setReplies([
+function loadReplies(dataReplies) {
+  if (dataReplies?.length > 0) {
+    replies = [
       { text: 'Speak', action: 'speak' },
       ...dataReplies.map(r => ({ text: r, action: 'text', value: r })),
-    ]);
+    ];
   } else {
-    setDefaultReplies();
+    defaultReplies();
   }
+  selectedIndex = 0;
 }
 
 async function showText(text) {
-  let display = text || '';
-  if (display.length > MAX_CHARS) display = display.slice(0, MAX_CHARS) + '...';
-  await pushResponse(display);
+  let t = text || '';
+  if (t.length > MAX_CHARS) t = t.slice(0, MAX_CHARS) + '...';
+  await pushResponse(t);
 }
 
-// ── Event Handler ──────────────────────────────────────────────
+// ── Events ──────────────────────────────────────────────────
 function handleEvent(event) {
-  // System events (touchpad / ring gestures)
+  log('Event: ' + JSON.stringify(event.sysEvent?.eventType || event.listEvent?.eventType || 'other'));
+
+  // List container events (reply selection in chat mode)
+  if (event.listEvent && mode === 'chat') {
+    const { currentSelectItemIndex, eventType } = event.listEvent;
+    selectedIndex = currentSelectItemIndex;
+    if (eventType === 'click' || eventType === 'tap') {
+      doReplySelect();
+    }
+    return;
+  }
+
+  // System events (touchpad / ring)
   if (event.sysEvent) {
     const et = event.sysEvent.eventType;
 
     if (mode === 'start') {
       if (et === 'swipe_up') {
         startSelectedIndex = Math.max(0, startSelectedIndex - 1);
-        renderStartScreen();
+        renderStart();
       } else if (et === 'swipe_down') {
         startSelectedIndex = Math.min(1, startSelectedIndex + 1);
-        renderStartScreen();
-      } else if (et === 'tap' || et === 'press') {
+        renderStart();
+      } else if (et === 'tap' || et === 'press' || et === 'click') {
         doStartSelect();
       }
       return;
@@ -302,27 +298,14 @@ function handleEvent(event) {
 
     if (mode === 'chat') {
       if (et === 'swipe_up') {
-        moveSelection(-1);
+        selectedIndex = Math.max(0, selectedIndex - 1);
+        pushReplyList();
       } else if (et === 'swipe_down') {
-        moveSelection(1);
-      } else if (et === 'tap' || et === 'press') {
+        selectedIndex = Math.min(replies.length - 1, selectedIndex + 1);
+        pushReplyList();
+      } else if (et === 'tap' || et === 'press' || et === 'click') {
         doReplySelect();
       }
-      return;
-    }
-  }
-
-  // List events (from SDK list container, if used)
-  if (event.listEvent) {
-    const { currentSelectItemIndex, eventType } = event.listEvent;
-    if (mode === 'start') {
-      startSelectedIndex = currentSelectItemIndex;
-      renderStartScreen();
-      if (eventType === 'click' || eventType === 'tap') doStartSelect();
-    } else if (mode === 'chat') {
-      selectedIndex = currentSelectItemIndex;
-      pushReplies();
-      if (eventType === 'click' || eventType === 'tap') doReplySelect();
     }
   }
 }
@@ -339,25 +322,16 @@ function doReplySelect() {
   else if (reply.action === 'text') sendMessage(reply.value || reply.text);
 }
 
-// ── Navigation ──────────────────────────────────────────────
-function moveSelection(dir) {
-  if (isProcessing) return;
-  selectedIndex = Math.max(0, Math.min(replies.length - 1, selectedIndex + dir));
-  pushReplies();
-}
-
 // ── Voice ──────────────────────────────────────────────────
 async function startListening() {
   if (!bridge) return;
   await showText('[ Listening... ]');
-
   try {
     await bridge.audioControl(true, AudioInputSource.Glasses);
     const chunks = [];
     const unsub = bridge.onEvenHubEvent(e => {
       if (e.audioEvent?.audioPcm) chunks.push(e.audioEvent.audioPcm);
     });
-
     setTimeout(async () => {
       unsub();
       await bridge.audioControl(false);
@@ -372,7 +346,6 @@ async function startListening() {
       }
     }, 10000);
   } catch (e) {
-    log('MIC error: ' + e.message);
     await showText('MIC error.');
   }
 }
@@ -393,10 +366,9 @@ async function sendMessage(text) {
     if (!res.ok) throw new Error('API ' + res.status);
     const data = await res.json();
     conversationHistory.push({ role: 'assistant', content: data.response });
-
     await showText(data.response);
-    setRepliesFromData(data.replies);
-    await pushReplies();
+    loadReplies(data.replies);
+    await pushReplyList();
   } catch (e) {
     await showText('Error: ' + e.message);
   } finally {
@@ -423,13 +395,6 @@ async function sendAudio(audioData) {
   }
 }
 
-// ── Replies ──────────────────────────────────────────────────
-function setReplies(list) {
-  replies = list.slice(0, 5);
-  selectedIndex = 0;
-}
-
-// ── Go ──────────────────────────────────────────────────
 init();
 </script>
 </body>
