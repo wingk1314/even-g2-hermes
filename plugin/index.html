@@ -9,7 +9,7 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     font-family: -apple-system, system-ui, sans-serif;
-    background: #000;
+    background: #111;
     color: #33ff33;
     width: 576px;
     height: 288px;
@@ -22,48 +22,6 @@
     height: 100%;
     padding: 12px 16px;
   }
-  #response-area {
-    flex: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
-    line-height: 1.4;
-    font-size: 18px;
-    word-wrap: break-word;
-    padding-bottom: 4px;
-    scrollbar-width: none;
-  }
-  #response-area::-webkit-scrollbar { display: none; }
-  #divider {
-    border-top: 1px solid #33ff3344;
-    margin: 4px 0;
-  }
-  #reply-list {
-    flex-shrink: 0;
-  }
-  .reply-item {
-    padding: 4px 8px;
-    font-size: 16px;
-    line-height: 1.3;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .reply-item.selected {
-    background: #33ff3322;
-    border-radius: 4px;
-  }
-  .reply-arrow {
-    color: #33ff33;
-    font-weight: bold;
-    min-width: 16px;
-  }
-  .reply-text {
-    flex: 1;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
   #status {
     position: absolute;
     top: 4px;
@@ -71,171 +29,43 @@
     font-size: 12px;
     color: #33ff3366;
   }
-  #listening-overlay {
-    display: none;
+  #debug {
     position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background: #000ee;
-    align-items: center;
-    justify-content: center;
-    flex-direction: column;
-    gap: 12px;
-    z-index: 10;
-  }
-  #listening-overlay.active { display: flex; }
-  .pulse {
-    font-size: 48px;
-    animation: pulse 1.5s ease-in-out infinite;
-  }
-  @keyframes pulse {
-    0%, 100% { opacity: 0.4; transform: scale(0.95); }
-    50% { opacity: 1; transform: scale(1.1); }
-  }
-  .start-option {
-    padding: 12px 16px;
-    font-size: 20px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-  .start-option.selected {
-    background: #33ff3322;
-    border-radius: 6px;
-  }
-  .start-arrow { font-weight: bold; min-width: 20px; }
-  .session-hint {
-    font-size: 13px;
-    color: #33ff3388;
-    margin-top: 4px;
-    padding-left: 32px;
-  }
-
-  /* ── Boot Animation ──────────────────────────────── */
-  #boot-screen {
-    position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background: #000;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    z-index: 20;
-    transition: opacity 0.4s ease;
-  }
-  #boot-screen.fade-out {
-    opacity: 0;
-    pointer-events: none;
-  }
-  .boot-logo {
-    font-size: 48px;
-    letter-spacing: 8px;
-    font-weight: 300;
-    margin-bottom: 16px;
-    opacity: 0;
-    animation: bootFadeIn 0.8s ease forwards;
-  }
-  .boot-dots {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 20px;
-    opacity: 0;
-    animation: bootFadeIn 0.4s ease 0.6s forwards;
-  }
-  .boot-dot {
-    width: 8px;
-    height: 8px;
-    background: #33ff33;
-    border-radius: 50%;
-    opacity: 0.2;
-  }
-  .boot-dot:nth-child(1) { animation: dotPulse 1.2s ease-in-out 0.8s infinite; }
-  .boot-dot:nth-child(2) { animation: dotPulse 1.2s ease-in-out 1.0s infinite; }
-  .boot-dot:nth-child(3) { animation: dotPulse 1.2s ease-in-out 1.2s infinite; }
-  .boot-tagline {
-    font-size: 14px;
-    color: #33ff3366;
-    opacity: 0;
-    animation: bootFadeIn 0.5s ease 1.0s forwards;
-  }
-  @keyframes bootFadeIn {
-    to { opacity: 1; }
-  }
-  @keyframes dotPulse {
-    0%, 100% { opacity: 0.2; }
-    50% { opacity: 1; }
-  }
-
-  /* ── Greeting ──────────────────────────────────── */
-  #greeting {
-    font-size: 22px;
-    margin-bottom: 16px;
-    opacity: 0;
-    animation: greetFadeIn 0.5s ease forwards;
-  }
-  @keyframes greetFadeIn {
-    from { opacity: 0; transform: translateY(-8px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  /* ── Scroll indicator ──────────────────────────── */
-  .scroll-hint {
-    text-align: center;
-    font-size: 12px;
+    bottom: 4px;
+    left: 12px;
+    font-size: 11px;
     color: #33ff3344;
-    padding: 2px 0;
-    flex-shrink: 0;
+    max-width: 90%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 </style>
 </head>
 <body>
 <div id="app">
   <div id="status">●</div>
-  <div id="response-area">
-    <!-- Boot animation -->
-    <div id="boot-screen">
-      <div class="boot-logo">A</div>
-      <div class="boot-dots">
-        <div class="boot-dot"></div>
-        <div class="boot-dot"></div>
-        <div class="boot-dot"></div>
-      </div>
-      <div class="boot-tagline">Hermes Agent</div>
-    </div>
-    <!-- Start screen -->
-    <div id="start-screen" style="display: none;">
-      <div id="greeting">Hi, I'm Alita</div>
-      <div id="start-options">
-        <div class="start-option selected" data-index="0">
-          <span class="start-arrow">→</span>
-          <span>Continue</span>
-        </div>
-        <div class="session-hint" id="session-hint"></div>
-        <div class="start-option" data-index="1" style="margin-top: 8px;">
-          <span class="start-arrow"> </span>
-          <span>New conversation</span>
-        </div>
-      </div>
-    </div>
-    <!-- Chat screen (hidden initially) -->
-    <div id="chat-screen" style="display: none;">
-      <div id="response-text"></div>
-    </div>
-  </div>
-  <div id="scroll-indicator" class="scroll-hint" style="display: none;">▼ scroll</div>
-  <div id="divider"></div>
-  <div id="reply-list"></div>
-</div>
-<div id="listening-overlay">
-  <div class="pulse">🎤</div>
-  <div style="color: #33ff33; font-size: 18px;">Listening...</div>
+  <div id="debug">Initializing...</div>
 </div>
 
 <script type="module">
-import { waitForEvenAppBridge, AudioInputSource } from './node_modules/@evenrealities/even_hub_sdk/dist/index.js';
+import {
+  waitForEvenAppBridge,
+  AudioInputSource,
+  StartUpPageCreateResult,
+} from './node_modules/@evenrealities/even_hub_sdk/dist/index.js';
 
 // ── Config ──────────────────────────────────────────────────
 const API_BASE = 'http://192.168.0.203:9191';
-const DISPLAY_MAX_CHARS = 400;
+const DISPLAY_MAX_CHARS = 300;
+
+// Glasses canvas: 576 x 288
+// Layout: header (40px) + response (180px) + divider (8px) + replies (60px)
+const LAYOUT = {
+  header:   { x: 16, y: 8,   w: 544, h: 32 },
+  response: { x: 16, y: 48,  w: 544, h: 170 },
+  replies:  { x: 16, y: 226, w: 544, h: 54 },
+};
 
 // ── State ──────────────────────────────────────────────────
 let bridge = null;
@@ -247,51 +77,133 @@ let conversationHistory = [];
 let mode = 'boot'; // 'boot' | 'start' | 'chat'
 let startSelectedIndex = 0;
 let sessionInfo = null;
+let glassesReady = false;
 
-// ── DOM ──────────────────────────────────────────────────
-const responseArea = document.getElementById('response-area');
-const responseText = document.getElementById('response-text');
-const replyList = document.getElementById('reply-list');
-const statusEl = document.getElementById('status');
-const listenOverlay = document.getElementById('listening-overlay');
-const startScreen = document.getElementById('start-screen');
-const chatScreen = document.getElementById('chat-screen');
-const sessionHint = document.getElementById('session-hint');
-const startOptions = document.querySelectorAll('.start-option');
-const bootScreen = document.getElementById('boot-screen');
-const scrollIndicator = document.getElementById('scroll-indicator');
+const debugEl = document.getElementById('debug');
+
+function log(msg) {
+  console.log('[Alita]', msg);
+  debugEl.textContent = msg;
+}
+
+// ── Glasses Display ──────────────────────────────────────────────
+
+async function initGlassesDisplay() {
+  if (!bridge) return false;
+  try {
+    const result = await bridge.createStartUpPageContainer({
+      containerTotalNum: 3,
+      textObject: [
+        {
+          xPosition: LAYOUT.header.x,
+          yPosition: LAYOUT.header.y,
+          width: LAYOUT.header.w,
+          height: LAYOUT.header.h,
+          containerID: 1,
+          containerName: 'header',
+          content: '',
+          isEventCapture: 0,
+        },
+        {
+          xPosition: LAYOUT.response.x,
+          yPosition: LAYOUT.response.y,
+          width: LAYOUT.response.w,
+          height: LAYOUT.response.h,
+          containerID: 2,
+          containerName: 'response',
+          content: '',
+          isEventCapture: 0,
+        },
+        {
+          xPosition: LAYOUT.replies.x,
+          yPosition: LAYOUT.replies.y,
+          width: LAYOUT.replies.w,
+          height: LAYOUT.replies.h,
+          containerID: 3,
+          containerName: 'replies',
+          content: '',
+          isEventCapture: 1,
+        },
+      ],
+    });
+    glassesReady = result === StartUpPageCreateResult.success;
+    log('Glasses display: ' + (glassesReady ? 'OK' : 'FAIL'));
+    return glassesReady;
+  } catch (err) {
+    log('Glasses init error: ' + err.message);
+    return false;
+  }
+}
+
+async function updateGlasses(containerID, containerName, content) {
+  if (!bridge || !glassesReady) return;
+  try {
+    await bridge.textContainerUpgrade({
+      containerID,
+      containerName,
+      content,
+    });
+  } catch (err) {
+    log('Update error: ' + containerName + ': ' + err.message);
+  }
+}
+
+async function updateHeader(text) {
+  await updateGlasses(1, 'header', text);
+}
+
+async function updateResponse(text) {
+  await updateGlasses(2, 'response', text);
+}
+
+async function updateReplies() {
+  const lines = replies.map((r, i) =>
+    (i === selectedIndex ? '> ' : '  ') + r.text
+  ).join('\n');
+  await updateGlasses(3, 'replies', lines);
+}
 
 // ── Init ──────────────────────────────────────────────────
 async function init() {
   try {
     bridge = await waitForEvenAppBridge();
-    console.log('Bridge connected');
+    log('Bridge connected');
     bridge.onEvenHubEvent(handleEvent);
-  } catch (err) {
-    console.error('Bridge init failed:', err);
-  }
 
-  // Run boot sequence
-  runBootSequence();
+    // Initialize glasses display
+    await initGlassesDisplay();
+
+    // Boot sequence on glasses
+    await runBootSequence();
+  } catch (err) {
+    log('Init error: ' + err.message);
+    // Still try boot sequence without bridge
+    await runBootSequence();
+  }
 }
 
 // ── Boot Sequence ──────────────────────────────────────────────
 async function runBootSequence() {
-  // Show boot animation for 2.5 seconds
-  await new Promise(r => setTimeout(r, 2500));
+  mode = 'boot';
 
-  // Fade out boot screen
-  bootScreen.classList.add('fade-out');
+  // Boot animation on glasses
+  if (glassesReady) {
+    await updateHeader('Alita');
+    await updateResponse('A');
+    await new Promise(r => setTimeout(r, 600));
+    await updateResponse('A.');
+    await new Promise(r => setTimeout(r, 500));
+    await updateResponse('A..');
+    await new Promise(r => setTimeout(r, 500));
+    await updateResponse('A...');
+    await new Promise(r => setTimeout(r, 800));
+  }
 
-  // Fetch session info in parallel
-  fetchSessionInfo();
+  // Fetch session info
+  await fetchSessionInfo();
 
-  // Wait for fade out, then show start screen
-  await new Promise(r => setTimeout(r, 500));
-  bootScreen.style.display = 'none';
-  startScreen.style.display = 'block';
-  mode = 'start';
-  updateStartSelection();
+  // Show start screen
+  showStartScreen();
 }
 
 // ── Session Info ──────────────────────────────────────────────
@@ -300,46 +212,48 @@ async function fetchSessionInfo() {
     const res = await fetch(API_BASE + '/session-info');
     if (res.ok) {
       sessionInfo = await res.json();
-      if (sessionInfo.lastTopic) {
-        sessionHint.textContent = sessionInfo.lastTopic;
-      }
     }
   } catch {
     // Silent fail
   }
 }
 
-// ── Scroll Management ──────────────────────────────────────────────
-function checkScroll() {
-  const el = responseArea;
-  if (el.scrollHeight > el.clientHeight) {
-    scrollIndicator.style.display = 'block';
-    // Auto-scroll to bottom on new content
-    el.scrollTop = el.scrollHeight;
-  } else {
-    scrollIndicator.style.display = 'none';
+// ── Start Screen ──────────────────────────────────────────────
+function showStartScreen() {
+  mode = 'start';
+  startSelectedIndex = 0;
+
+  const hint = sessionInfo?.lastTopic || '';
+  const lines = [
+    "Hi, I'm Alita",
+    '',
+    '> Continue',
+    hint ? '  ' + hint : '',
+    '',
+    '  New conversation',
+  ].filter((_, i) => i < 6).join('\n');
+
+  if (glassesReady) {
+    updateHeader('Alita');
+    updateResponse(lines);
+    updateReplies(); // clear replies area
   }
 }
 
-// Add scroll listener to hide indicator when at bottom
-responseArea.addEventListener('scroll', () => {
-  const el = responseArea;
-  const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 5;
-  scrollIndicator.style.display = atBottom ? 'none' : 'block';
-});
-
-// ── Start Screen ──────────────────────────────────────────────
 function updateStartSelection() {
-  startOptions.forEach((el, i) => {
-    const arrow = el.querySelector('.start-arrow');
-    if (i === startSelectedIndex) {
-      el.classList.add('selected');
-      arrow.textContent = '→';
-    } else {
-      el.classList.remove('selected');
-      arrow.textContent = ' ';
-    }
-  });
+  const hint = sessionInfo?.lastTopic || '';
+  const lines = [
+    "Hi, I'm Alita",
+    '',
+    startSelectedIndex === 0 ? '> Continue' : '  Continue',
+    hint ? '  ' + hint : '',
+    '',
+    startSelectedIndex === 1 ? '> New conversation' : '  New conversation',
+  ].join('\n');
+
+  if (glassesReady) {
+    updateResponse(lines);
+  }
 }
 
 function selectStartOption() {
@@ -350,55 +264,67 @@ function selectStartOption() {
   }
 }
 
+// ── Chat ──────────────────────────────────────────────────────
 async function startChat(continueSession) {
-  startScreen.style.display = 'none';
-  chatScreen.style.display = 'block';
   mode = 'chat';
 
+  if (glassesReady) {
+    await updateHeader('Alita');
+    await updateResponse('Loading...');
+    await updateReplies();
+  }
+
   if (continueSession) {
-    responseText.textContent = 'Loading...';
     try {
       const res = await fetch(API_BASE + '/continue');
       if (res.ok) {
         const data = await res.json();
         conversationHistory = data.history || [];
-        if (data.summary) {
-          responseText.textContent = data.summary;
-        } else {
-          responseText.textContent = 'Ready.';
-        }
+        const summary = data.summary || 'Ready.';
+        await showResponse(summary);
         if (data.replies) {
           setReplies([
-            { text: '🎤 Speak', action: 'speak' },
+            { text: 'Speak', action: 'speak' },
             ...data.replies.map(r => ({ text: r, action: 'text', value: r })),
           ]);
         } else {
           setDefaultReplies();
         }
       } else {
-        responseText.textContent = 'Ready.';
+        await showResponse('Ready.');
         setDefaultReplies();
       }
     } catch {
-      responseText.textContent = 'Ready.';
+      await showResponse('Ready.');
       setDefaultReplies();
     }
   } else {
-    responseText.textContent = 'New conversation.';
+    await showResponse('New conversation.');
     setDefaultReplies();
   }
-  renderReplies();
-  checkScroll();
+
+  await updateReplies();
 }
 
 function setDefaultReplies() {
   setReplies([
-    { text: '🎤 Speak', action: 'speak' },
+    { text: 'Speak', action: 'speak' },
     { text: 'What can you do?', action: 'text', value: 'What can you do?' },
     { text: 'What time is it?', action: 'text', value: 'What time is it?' },
-    { text: 'Calendar', action: 'text', value: 'What\'s on my calendar today?' },
+    { text: 'Calendar', action: 'text', value: "What's on my calendar today?" },
     { text: 'Help', action: 'text', value: 'Help me with something' },
   ]);
+}
+
+async function showResponse(text) {
+  let display = text;
+  if (display.length > DISPLAY_MAX_CHARS) {
+    display = display.slice(0, DISPLAY_MAX_CHARS) + '...';
+  }
+  if (glassesReady) {
+    // Split into pages if needed (glasses show ~8 lines of ~45 chars each)
+    await updateResponse(display);
+  }
 }
 
 // ── Event Handler ──────────────────────────────────────────────
@@ -408,24 +334,14 @@ function handleEvent(event) {
     return;
   }
 
-  // Scroll events for chat mode
   if (event.sysEvent) {
     const { eventType } = event.sysEvent;
     if (eventType === 'swipe_up') {
-      // If replies are focused, move selection; otherwise scroll response
-      if (document.activeElement === replyList || selectedIndex > 0) {
-        moveSelection(-1);
-      } else {
-        responseArea.scrollTop -= 40;
-      }
+      moveSelection(-1);
       return;
     }
     if (eventType === 'swipe_down') {
-      if (selectedIndex < replies.length - 1) {
-        moveSelection(1);
-      } else {
-        responseArea.scrollTop += 40;
-      }
+      moveSelection(1);
       return;
     }
     if (eventType === 'tap') {
@@ -437,7 +353,7 @@ function handleEvent(event) {
   if (event.listEvent) {
     const { currentSelectItemIndex, eventType } = event.listEvent;
     selectedIndex = currentSelectItemIndex;
-    renderReplies();
+    updateReplies();
     if (eventType === 'click' || eventType === 'tap') {
       selectReply();
     }
@@ -445,12 +361,6 @@ function handleEvent(event) {
 }
 
 function handleStartEvent(event) {
-  if (event.listEvent) {
-    const { currentSelectItemIndex, eventType } = event.listEvent;
-    startSelectedIndex = currentSelectItemIndex;
-    updateStartSelection();
-    if (eventType === 'click' || eventType === 'tap') selectStartOption();
-  }
   if (event.sysEvent) {
     const { eventType } = event.sysEvent;
     if (eventType === 'swipe_up') {
@@ -463,13 +373,17 @@ function handleStartEvent(event) {
       selectStartOption();
     }
   }
+  if (event.listEvent) {
+    const { eventType } = event.listEvent;
+    if (eventType === 'click' || eventType === 'tap') selectStartOption();
+  }
 }
 
 // ── Navigation ──────────────────────────────────────────────
 function moveSelection(dir) {
   if (isProcessing) return;
   selectedIndex = Math.max(0, Math.min(replies.length - 1, selectedIndex + dir));
-  renderReplies();
+  updateReplies();
 }
 
 function selectReply() {
@@ -486,9 +400,12 @@ function selectReply() {
 
 // ── Voice Input ──────────────────────────────────────────────
 async function startListening() {
-  if (isListening) return;
+  if (isListening || !bridge) return;
   isListening = true;
-  listenOverlay.classList.add('active');
+
+  if (glassesReady) {
+    await updateResponse('[ Listening... ]');
+  }
 
   try {
     await bridge.audioControl(true, AudioInputSource.Glasses);
@@ -504,7 +421,6 @@ async function startListening() {
       unsubscribe();
       await bridge.audioControl(false);
       isListening = false;
-      listenOverlay.classList.remove('active');
 
       if (audioChunks.length > 0) {
         const totalLength = audioChunks.reduce((sum, c) => sum + c.length, 0);
@@ -516,14 +432,13 @@ async function startListening() {
         }
         sendAudio(audioData);
       } else {
-        setStatus('No audio');
+        if (glassesReady) await updateResponse('No audio captured.');
       }
     }, 10000);
   } catch (err) {
-    console.error('Audio error:', err);
+    log('Audio error: ' + err.message);
     isListening = false;
-    listenOverlay.classList.remove('active');
-    setStatus('MIC error');
+    if (glassesReady) await updateResponse('MIC error.');
   }
 }
 
@@ -531,9 +446,11 @@ async function startListening() {
 async function sendMessage(text) {
   if (isProcessing) return;
   isProcessing = true;
-  setStatus('⏳');
-  responseText.textContent = 'Thinking...';
-  scrollIndicator.style.display = 'none';
+
+  if (glassesReady) {
+    await updateResponse('Thinking...');
+    await updateReplies();
+  }
 
   conversationHistory.push({ role: 'user', content: text });
 
@@ -552,24 +469,19 @@ async function sendMessage(text) {
 
     conversationHistory.push({ role: 'assistant', content: data.response });
 
-    let display = data.response;
-    if (display.length > DISPLAY_MAX_CHARS) display = display.slice(0, DISPLAY_MAX_CHARS) + '...';
-    responseText.textContent = display;
+    await showResponse(data.response);
 
     if (data.replies && data.replies.length > 0) {
       setReplies([
-        { text: '🎤 Speak', action: 'speak' },
+        { text: 'Speak', action: 'speak' },
         ...data.replies.map(r => ({ text: r, action: 'text', value: r })),
       ]);
     } else {
       setDefaultReplies();
     }
-    renderReplies();
-    setStatus('●');
-    checkScroll();
+    await updateReplies();
   } catch (err) {
-    responseText.textContent = 'Error: ' + err.message;
-    setStatus('✗');
+    await showResponse('Error: ' + err.message);
   } finally {
     isProcessing = false;
   }
@@ -578,7 +490,6 @@ async function sendMessage(text) {
 async function sendAudio(audioData) {
   if (isProcessing) return;
   isProcessing = true;
-  setStatus('⏳');
 
   try {
     const res = await fetch(API_BASE + '/transcribe', {
@@ -591,43 +502,19 @@ async function sendAudio(audioData) {
     if (data.text) {
       sendMessage(data.text);
     } else {
-      setStatus('No speech');
+      if (glassesReady) await updateResponse('No speech detected.');
       isProcessing = false;
     }
   } catch (err) {
-    setStatus('✗');
+    if (glassesReady) await updateResponse('Transcription error.');
     isProcessing = false;
   }
 }
 
 // ── Rendering ──────────────────────────────────────────────
 function setReplies(newReplies) {
-  replies = newReplies.slice(0, 6);
+  replies = newReplies.slice(0, 5);
   selectedIndex = 0;
-}
-
-function renderReplies() {
-  replyList.innerHTML = replies.map((r, i) =>
-    `<div class="reply-item ${i === selectedIndex ? 'selected' : ''}">
-      <span class="reply-arrow">${i === selectedIndex ? '→' : ' '}</span>
-      <span class="reply-text">${r.text}</span>
-    </div>`
-  ).join('');
-
-  if (bridge) {
-    const listContent = replies.map((r, i) =>
-      (i === selectedIndex ? '→ ' : '  ') + r.text
-    ).join('\n');
-    bridge.textContainerUpgrade({
-      containerID: 1,
-      containerName: 'reply-list',
-      content: listContent,
-    }).catch(() => {});
-  }
-}
-
-function setStatus(text) {
-  statusEl.textContent = text;
 }
 
 // ── Bootstrap ──────────────────────────────────────────────
