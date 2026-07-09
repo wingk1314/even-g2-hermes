@@ -157,36 +157,34 @@ function renderReplies() {
 
 // ── Events ──────────────────────────────────────────────────
 function onEvent(event) {
-  // ANY event from the bridge = user interaction
-  // For start screen: swipe changes selection, any event triggers after debounce
-  // For chat screen: same for replies
-
-  if (event.listEvent) {
-    const idx = event.listEvent.currentSelectItemIndex;
-    if (typeof idx === 'number') {
-      if (mode === 'start') { startSel = idx; renderStart(); }
-      else if (mode === 'chat') { selIdx = idx; renderReplies(); }
-    }
-    return;
-  }
-
-  // sysEvent = tap/press on touchpad or ring
+  // sysEvent = touchpad/ring gestures
   if (event.sysEvent) {
-    if (mode === 'start') {
-      startChat(startSel === 0);
-    } else if (mode === 'chat') {
-      doSelect();
+    const et = event.sysEvent.eventType;
+
+    // Swipe = navigate selection
+    if (et === 'swipe_up') {
+      if (mode === 'start') { startSel = Math.max(0, startSel - 1); renderStart(); }
+      else if (mode === 'chat') { selIdx = Math.max(0, selIdx - 1); renderReplies(); }
+      return;
     }
-    return;
+    if (et === 'swipe_down') {
+      if (mode === 'start') { startSel = Math.min(1, startSel + 1); renderStart(); }
+      else if (mode === 'chat') { selIdx = Math.min(replies.length - 1, selIdx + 1); renderReplies(); }
+      return;
+    }
+
+    // Tap/press = confirm selection
+    if (et === 'tap' || et === 'press' || et === 'click') {
+      if (mode === 'start') startChat(startSel === 0);
+      else if (mode === 'chat') doSelect();
+      return;
+    }
   }
 
   // textEvent = tap on text container
   if (event.textEvent) {
-    if (mode === 'start') {
-      startChat(startSel === 0);
-    } else if (mode === 'chat') {
-      doSelect();
-    }
+    if (mode === 'start') startChat(startSel === 0);
+    else if (mode === 'chat') doSelect();
   }
 }
 
