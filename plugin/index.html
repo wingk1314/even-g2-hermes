@@ -15,108 +15,90 @@ import {
 } from './node_modules/@evenrealities/even_hub_sdk/dist/index.js';
 
 const API_BASE = 'http://192.168.0.203:9191';
-const MAX_CHARS = 280;
+const MAX = 280;
 
-// Glasses: 576 x 288
-// Layout: header + body (list or text) + bottom list
-const L = {
-  header: { x: 16, y: 8,   w: 544, h: 32 },
-  body:   { x: 16, y: 48,  w: 544, h: 168 },
-  bottom: { x: 16, y: 220, w: 544, h: 60 },
-};
-
-let bridge = null, glassesReady = false;
-let mode = 'boot', selectedIndex = 0, startSelectedIndex = 0;
-let replies = [], isProcessing = false, conversationHistory = [], sessionInfo = null;
+let bridge = null, ready = false, mode = 'boot';
+let replies = [], selIdx = 0, processing = false;
+let history = [], sessionInfo = null;
 
 function log(m) { console.log('[Alita]', m); }
+function trunc(s) { return (s || '').length > MAX ? s.slice(0, MAX) + '...' : s || ''; }
 
-// ── Glasses Containers ──────────────────────────────────────────
-
-// Start screen: greeting in header, Continue/New as list in body
-function startContainers() {
-  const hint = sessionInfo?.lastTopic || '';
-  return {
-    containerTotalNum: 3,
-    textObject: [
-      { xPosition: L.header.x, yPosition: L.header.y, width: L.header.w, height: L.header.h,
-        containerID: 1, containerName: 'header', content: "Hi, I'm Alita", isEventCapture: 0 },
-      { xPosition: L.bottom.x, yPosition: L.bottom.y, width: L.bottom.w, height: L.bottom.h,
-        containerID: 3, containerName: 'bottom', content: '', isEventCapture: 0 },
-    ],
-    listObject: [
-      { xPosition: L.body.x, yPosition: L.body.y, width: L.body.w, height: L.body.h,
-        containerID: 2, containerName: 'body',
-        itemContainer: {
-          itemCount: 2,
-          itemName: [
-            'Continue' + (hint ? '  (' + hint.slice(0, 35) + ')' : ''),
-            'New conversation',
-          ],
-        },
-        isEventCapture: 1 },
-    ],
-  };
+// ── Glasses: Create initial layout ──────────────────────────────
+// 3 text containers: header, body, footer
+// Start with no event capture — we'll rebuild per screen
+async function createDisplay() {
+  if (!bridge) return;
+  try {
+    const r = await bridge.createStartUpPageContainer({
+      containerTotalNum: 3,
+      textObject: [
+        { xPosition: 16, yPosition: 8, width: 544, height: 32,
+          containerID: 1, containerName: 'hdr', content: '', isEventCapture: 0 },
+        { xPosition: 16, yPosition: 48, width: 544, height: 168,
+          containerID: 2, containerName: 'body', content: '', isEventCapture: 0 },
+        { xPosition: 16, yPosition: 224, width: 544, height: 56,
+          containerID: 3, containerName: 'ftr', content: '', isEventCapture: 1 },
+      ],
+    });
+    ready = r === StartUpPageCreateResult.success;
+    log('Display: ' + (ready ? 'OK' : 'FAIL'));
+  } catch (e) { log('Display err: ' + e.message); }
 }
 
-// Chat screen: response as text, replies as list
-function chatContainers() {
-  return {
-    containerTotalNum: 3,
-    textObject: [
-      { xPosition: L.header.x, yPosition: L.header.y, width: L.header.w, height: L.header.h,
-        containerID: 1, containerName: 'header', content: 'Alita', isEventCapture: 0 },
-      { xPosition: L.body.x, yPosition: L.body.y, width: L.body.w, height: L.body.h,
-        containerID: 2, containerName: 'body', content: '', isEventCapture: 0 },
-    ],
-    listObject: [
-      { xPosition: L.bottom.x, yPosition: L.bottom.y, width: L.bottom.w, height: L.bottom.h,
-        containerID: 3, containerName: 'bottom',
-        itemContainer: {
-          itemCount: Math.max(1, replies.length),
-          itemName: replies.map(r => r.text),
-        },
-        isEventCapture: 1 },
-    ],
-  };
+// Update text in a container
+async function set(id, name, text) {
+  if (!bridge || !ready) return;
+  try { await bridge.textContainerUpgrade({ containerID: id, containerName: name, content: text }); }
+  catch {}
 }
 
-// Thinking/loading state: all text, no list events
-function thinkingContainers() {
-  return {
-    containerTotalNum: 3,
-    textObject: [
-      { xPosition: L.header.x, yPosition: L.header.y, width: L.header.w, height: L.header.h,
-        containerID: 1, containerName: 'header', content: 'Alita', isEventCapture: 0 },
-      { xPosition: L.body.x, yPosition: L.body.y, width: L.body.w, height: L.body.h,
-        containerID: 2, containerName: 'body', content: '', isEventCapture: 0 },
-      { xPosition: L.bottom.x, yPosition: L.bottom.y, width: L.bottom.w, height: L.bottom.h,
-        containerID: 3, containerName: 'bottom', content: '', isEventCapture: 0 },
-    ],
-  };
-}
-
+// Rebuild page — only call on major screen transitions
 async function rebuild(layout) {
   if (!bridge) return;
-  try {
-    await bridge.rebuildPageContainer(layout);
-    glassesReady = true;
-  } catch (e) { log('rebuild: ' + e.message); }
+  try { await bridge.rebuildPageContainer(layout); ready = true; }
+  catch (e) { log('rebuild err: ' + e.message); }
 }
 
-async function initGlasses() {
-  if (!bridge) return;
-  try {
-    const r = await bridge.createStartUpPageContainer(startContainers());
-    glassesReady = r === StartUpPageCreateResult.success;
-    log('Glasses: ' + (glassesReady ? 'OK' : 'FAIL'));
-  } catch (e) { log('init: ' + e.message); }
+// ── Screen layouts ──────────────────────────────────────────────
+
+// Start screen: list for Continue/New in body, events on body
+function layoutStart() {
+  return {
+    containerTotalNum: 3,
+    textObject: [
+      { xPosition: 16, yPosition: 8, width: 544, height: 32,
+        containerID: 1, containerName: 'hdr', content: "Hi, I'm Alita", isEventCapture: 0 },
+      { xPosition: 16, yPosition: 224, width: 544, height: 56,
+        containerID: 3, containerName: 'ftr', content: '', isEventCapture: 0 },
+    ],
+    listObject: [
+      { xPosition: 16, yPosition: 48, width: 544, height: 168,
+        containerID: 2, containerName: 'body',
+        itemContainer: { itemCount: 2, itemName: ['Continue', 'New conversation'] },
+        isEventCapture: 1 },
+    ],
+  };
 }
 
-async function pushText(id, name, content) {
-  if (!bridge || !glassesReady) return;
-  try { await bridge.textContainerUpgrade({ containerID: id, containerName: name, content }); }
-  catch {}
+// Chat screen: text body + list footer, events on footer
+function layoutChat() {
+  const names = replies.length > 0 ? replies.map(r => r.text) : [''];
+  return {
+    containerTotalNum: 3,
+    textObject: [
+      { xPosition: 16, yPosition: 8, width: 544, height: 32,
+        containerID: 1, containerName: 'hdr', content: 'Alita', isEventCapture: 0 },
+      { xPosition: 16, yPosition: 48, width: 544, height: 168,
+        containerID: 2, containerName: 'body', content: '', isEventCapture: 0 },
+    ],
+    listObject: [
+      { xPosition: 16, yPosition: 224, width: 544, height: 56,
+        containerID: 3, containerName: 'ftr',
+        itemContainer: { itemCount: Math.max(1, names.length), itemName: names },
+        isEventCapture: 1 },
+    ],
+  };
 }
 
 // ── Init ──────────────────────────────────────────────────
@@ -124,227 +106,190 @@ async function init() {
   try {
     bridge = await waitForEvenAppBridge();
     log('Bridge OK');
-    bridge.onEvenHubEvent(handleEvent);
-    await initGlasses();
+    bridge.onEvenHubEvent(onEvent);
+    await createDisplay();
     await boot();
-  } catch (e) { log('Bridge fail: ' + e.message); }
+  } catch (e) { log('Init err: ' + e.message); }
 }
 
-// ── Boot ──────────────────────────────────────────────────
+// ── Boot sequence ──────────────────────────────────────────────
 async function boot() {
   mode = 'boot';
-  if (glassesReady) {
-    await pushText(1, 'header', 'Alita');
-    await pushText(2, 'body', 'Starting.');
-    await new Promise(r => setTimeout(r, 800));
-    await pushText(2, 'body', 'Starting..');
-    await new Promise(r => setTimeout(r, 800));
-    await pushText(2, 'body', 'Starting...');
-    await new Promise(r => setTimeout(r, 600));
+  if (ready) {
+    await set(1, 'hdr', 'Alita');
+    await set(2, 'body', 'Starting.');
+    await sleep(700);
+    await set(2, 'body', 'Starting..');
+    await sleep(700);
+    await set(2, 'body', 'Starting...');
+    await sleep(500);
   }
-  await fetchSessionInfo();
-  showStartScreen();
+  // Fetch session info
+  try { const r = await fetch(API_BASE + '/session-info'); if (r.ok) sessionInfo = await r.json(); } catch {}
+  showStart();
 }
 
-async function fetchSessionInfo() {
-  try {
-    const res = await fetch(API_BASE + '/session-info');
-    if (res.ok) sessionInfo = await res.json();
-  } catch {}
-}
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// ── Start Screen ──────────────────────────────────────────────
-async function showStartScreen() {
+// ── Start screen ──────────────────────────────────────────────
+async function showStart() {
   mode = 'start';
-  startSelectedIndex = 0;
-  // List container handles selection natively
-  await rebuild(startContainers());
+  await rebuild(layoutStart());
 }
 
 // ── Chat ──────────────────────────────────────────────────
-async function startChat(continueSession) {
+async function startChat(continued) {
   mode = 'chat';
 
-  // Show loading state (no list, just text)
-  await rebuild(thinkingContainers());
-  await pushText(2, 'body', 'Loading...');
+  // First rebuild to chat layout (clears list events during load)
+  replies = [{ text: '...', action: 'wait' }];
+  await rebuild(layoutChat());
+  await set(2, 'body', 'Loading...');
 
-  if (continueSession) {
+  if (continued) {
     try {
-      const res = await fetch(API_BASE + '/continue');
-      if (res.ok) {
-        const d = await res.json();
-        conversationHistory = d.history || [];
-        await pushText(2, 'body', trunc(d.summary || 'Ready.'));
-        loadReplies(d.replies);
+      const r = await fetch(API_BASE + '/continue');
+      if (r.ok) {
+        const d = await r.json();
+        history = d.history || [];
+        await set(2, 'body', trunc(d.summary || 'Ready.'));
+        makeReplies(d.replies);
       } else {
-        await pushText(2, 'body', 'Ready.');
+        await set(2, 'body', 'Ready.');
         defaultReplies();
       }
-    } catch {
-      await pushText(2, 'body', 'Ready.');
-      defaultReplies();
-    }
+    } catch { await set(2, 'body', 'Ready.'); defaultReplies(); }
   } else {
-    await pushText(2, 'body', 'New conversation.');
+    await set(2, 'body', 'New conversation.');
     defaultReplies();
   }
 
-  // Now rebuild with reply list
-  await rebuild(chatContainers());
+  selIdx = 0;
+  await rebuild(layoutChat());
 }
 
 function defaultReplies() {
   replies = [
     { text: 'Speak', action: 'speak' },
     { text: 'What can you do?', action: 'text', value: 'What can you do?' },
-    { text: 'What time is it?', action: 'text', value: 'What time is it?' },
+    { text: 'Time', action: 'text', value: 'What time is it?' },
     { text: 'Calendar', action: 'text', value: "What's on my calendar?" },
     { text: 'Help', action: 'text', value: 'Help me' },
   ];
-  selectedIndex = 0;
 }
 
-function loadReplies(data) {
-  if (data?.length > 0) {
-    replies = [
-      { text: 'Speak', action: 'speak' },
-      ...data.map(r => ({ text: r, action: 'text', value: r })),
-    ];
-  } else { defaultReplies(); }
-  selectedIndex = 0;
-}
-
-function trunc(t) {
-  let s = t || '';
-  return s.length > MAX_CHARS ? s.slice(0, MAX_CHARS) + '...' : s;
+function makeReplies(data) {
+  if (data?.length) {
+    replies = [{ text: 'Speak', action: 'speak' }, ...data.map(r => ({ text: r, action: 'text', value: r }))];
+  } else defaultReplies();
+  selIdx = 0;
 }
 
 // ── Events ──────────────────────────────────────────────────
-function handleEvent(event) {
-  // List events (selection in list containers)
+function onEvent(event) {
+  log('evt: ' + JSON.stringify({
+    sys: event.sysEvent?.eventType,
+    list: event.listEvent?.eventType,
+    idx: event.listEvent?.currentSelectItemIndex,
+  }));
+
+  // List selection events
   if (event.listEvent) {
-    const { currentSelectItemIndex, eventType } = event.listEvent;
-    selectedIndex = currentSelectItemIndex;
+    const idx = event.listEvent.currentSelectItemIndex;
+    const type = event.listEvent.eventType;
 
     if (mode === 'start') {
-      startSelectedIndex = currentSelectItemIndex;
-      if (eventType === 'click' || eventType === 'tap') doStartSelect();
+      // idx 0 = Continue, idx 1 = New
+      if (type === 'click' || type === 'tap') {
+        startChat(idx === 0);
+      }
       return;
     }
 
     if (mode === 'chat') {
-      selectedIndex = currentSelectItemIndex;
-      if (eventType === 'click' || eventType === 'tap') doReplySelect();
+      selIdx = idx;
+      if (type === 'click' || type === 'tap') {
+        doSelect();
+      }
       return;
     }
   }
 
-  // System events (backup — list containers handle most input)
+  // System events (tap/press as backup)
   if (event.sysEvent) {
     const et = event.sysEvent.eventType;
-
-    if (mode === 'start') {
-      if (et === 'tap' || et === 'press' || et === 'click') doStartSelect();
-      return;
-    }
-
-    if (mode === 'chat') {
-      if (et === 'tap' || et === 'press' || et === 'click') doReplySelect();
-      return;
+    if (et === 'tap' || et === 'press' || et === 'click') {
+      if (mode === 'start') startChat(0 === 0); // default Continue
+      else if (mode === 'chat') doSelect();
     }
   }
 }
 
-function doStartSelect() {
-  startChat(startSelectedIndex === 0);
-}
-
-function doReplySelect() {
-  if (isProcessing) return;
-  const r = replies[selectedIndex];
+function doSelect() {
+  if (processing) return;
+  const r = replies[selIdx];
   if (!r) return;
-  if (r.action === 'speak') startListening();
-  else if (r.action === 'text') sendMessage(r.value || r.text);
+  if (r.action === 'speak') listen();
+  else if (r.action === 'text') sendMsg(r.value || r.text);
 }
 
 // ── Voice ──────────────────────────────────────────────────
-async function startListening() {
+async function listen() {
   if (!bridge) return;
-  await rebuild(thinkingContainers());
-  await pushText(2, 'body', '[ Listening... ]');
+  await set(2, 'body', '[ Listening... ]');
   try {
     await bridge.audioControl(true, AudioInputSource.Glasses);
     const chunks = [];
-    const unsub = bridge.onEvenHubEvent(e => {
-      if (e.audioEvent?.audioPcm) chunks.push(e.audioEvent.audioPcm);
-    });
+    const unsub = bridge.onEvenHubEvent(e => { if (e.audioEvent?.audioPcm) chunks.push(e.audioEvent.audioPcm); });
     setTimeout(async () => {
-      unsub();
-      await bridge.audioControl(false);
-      if (chunks.length > 0) {
+      unsub(); await bridge.audioControl(false);
+      if (chunks.length) {
         const len = chunks.reduce((s, c) => s + c.length, 0);
-        const buf = new Uint8Array(len);
-        let off = 0;
-        for (const c of chunks) { buf.set(c, off); off += c.length; }
+        const buf = new Uint8Array(len); let o = 0;
+        for (const c of chunks) { buf.set(c, o); o += c.length; }
         sendAudio(buf);
-      } else {
-        await pushText(2, 'body', 'No audio.');
-      }
+      } else await set(2, 'body', 'No audio.');
     }, 10000);
-  } catch (e) {
-    await pushText(2, 'body', 'MIC error.');
-  }
+  } catch { await set(2, 'body', 'MIC error.'); }
 }
 
 // ── API ──────────────────────────────────────────────────
-async function sendMessage(text) {
-  if (isProcessing) return;
-  isProcessing = true;
-
-  // Show thinking (no list events during processing)
-  await rebuild(thinkingContainers());
-  await pushText(2, 'body', 'Thinking...');
-
-  conversationHistory.push({ role: 'user', content: text });
+async function sendMsg(text) {
+  if (processing) return;
+  processing = true;
+  await set(2, 'body', 'Thinking...');
+  history.push({ role: 'user', content: text });
 
   try {
-    const res = await fetch(API_BASE + '/chat', {
+    const r = await fetch(API_BASE + '/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, history: conversationHistory.slice(-10) }),
+      body: JSON.stringify({ message: text, history: history.slice(-10) }),
     });
-    if (!res.ok) throw new Error('API ' + res.status);
-    const data = await res.json();
-    conversationHistory.push({ role: 'assistant', content: data.response });
-
-    await pushText(2, 'body', trunc(data.response));
-    loadReplies(data.replies);
-    await rebuild(chatContainers());
+    if (!r.ok) throw new Error('API ' + r.status);
+    const d = await r.json();
+    history.push({ role: 'assistant', content: d.response });
+    await set(2, 'body', trunc(d.response));
+    makeReplies(d.replies);
+    selIdx = 0;
+    await rebuild(layoutChat());
   } catch (e) {
-    await pushText(2, 'body', 'Error: ' + e.message);
-  } finally {
-    isProcessing = false;
-  }
+    await set(2, 'body', 'Error: ' + e.message);
+  } finally { processing = false; }
 }
 
-async function sendAudio(audioData) {
-  if (isProcessing) return;
-  isProcessing = true;
+async function sendAudio(data) {
+  if (processing) return;
+  processing = true;
   try {
-    const res = await fetch(API_BASE + '/transcribe', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/octet-stream' },
-      body: audioData,
+    const r = await fetch(API_BASE + '/transcribe', {
+      method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: data,
     });
-    if (!res.ok) throw new Error('Transcribe ' + res.status);
-    const data = await res.json();
-    if (data.text) sendMessage(data.text);
-    else { await pushText(2, 'body', 'No speech.'); isProcessing = false; }
-  } catch {
-    await pushText(2, 'body', 'Transcribe error.');
-    isProcessing = false;
-  }
+    if (!r.ok) throw new Error('Transcribe ' + r.status);
+    const d = await r.json();
+    if (d.text) sendMsg(d.text);
+    else { await set(2, 'body', 'No speech.'); processing = false; }
+  } catch { await set(2, 'body', 'Error.'); processing = false; }
 }
 
 init();
