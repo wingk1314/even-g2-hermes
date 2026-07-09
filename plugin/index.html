@@ -20,31 +20,72 @@ const MAX = 400;
 let bridge = null, ready = false, mode = 'boot';
 let selIdx = 0, replies = [], processing = false;
 let history = [], sessionInfo = null;
-let lastEvt = ''; // show last event on screen for debugging
 
 function trunc(s) { return (s || '').length > MAX ? s.slice(0, MAX) + '...' : s || ''; }
 
-// ── ONE container — everything rendered as text ──────────────
-async function createDisplay() {
-  if (!bridge) return;
-  try {
-    const r = await bridge.createStartUpPageContainer({
-      containerTotalNum: 1,
-      textObject: [{
-        xPosition: 16, yPosition: 8, width: 544, height: 272,
-        containerID: 1, containerName: 'main',
-        content: '',
-        isEventCapture: 1,
-      }],
-    });
-    ready = r === StartUpPageCreateResult.success;
-  } catch {}
+// ── Debounce for tap vs swipe ──────────────────────────────
+// Swipe fires rapid listEvents; tap fires a single one.
+// Wait TAP_DELAY after last listEvent. If no more come, it's a tap.
+let tapTimer = null;
+const TAP_DELAY = 600; // ms — must be longer than gap between swipe events
+
+function scheduleTap(action) {
+  if (tapTimer) clearTimeout(tapTimer);
+  tapTimer = setTimeout(action, TAP_DELAY);
 }
 
-async function show(text) {
+function cancelTap() {
+  if (tapTimer) { clearTimeout(tapTimer); tapTimer = null; }
+}
+
+// ── Display ──────────────────────────────────────────────────
+
+// Start screen: header text + list (Continue/New)
+function startLayout() {
+  return {
+    containerTotalNum: 2,
+    textObject: [{
+      xPosition: 16, yPosition: 8, width: 544, height: 40,
+      containerID: 1, containerName: 'hdr',
+      content: "Hi, I'm Alita", isEventCapture: 0,
+    }],
+    listObject: [{
+      xPosition: 16, yPosition: 56, width: 544, height: 224,
+      containerID: 2, containerName: 'menu',
+      itemContainer: { itemCount: 2, itemName: ['Continue', 'New conversation'] },
+      isEventCapture: 1,
+    }],
+  };
+}
+
+// Chat screen: header + body text + reply list
+function chatLayout() {
+  const names = replies.length ? replies.map(r => r.text) : [''];
+  return {
+    containerTotalNum: 3,
+    textObject: [
+      { xPosition: 16, yPosition: 8, width: 544, height: 32,
+        containerID: 1, containerName: 'hdr', content: 'Alita', isEventCapture: 0 },
+      { xPosition: 16, yPosition: 44, width: 544, height: 140,
+        containerID: 2, containerName: 'body', content: '', isEventCapture: 0 },
+    ],
+    listObject: [{
+      xPosition: 16, yPosition: 188, width: 544, height: 92,
+      containerID: 3, containerName: 'replies',
+      itemContainer: { itemCount: Math.max(1, names.length), itemName: names },
+      isEventCapture: 1,
+    }],
+  };
+}
+
+async function rebuild(layout) {
+  if (!bridge) return;
+  try { await bridge.rebuildPageContainer(layout); ready = true; } catch {}
+}
+
+async function setText(id, name, text) {
   if (!bridge || !ready) return;
-  try { await bridge.textContainerUpgrade({ containerID: 1, containerName: 'main', content: text }); }
-  catch {}
+  try { await bridge.textContainerUpgrade({ containerID: id, containerName: name, content: text }); } catch {}
 }
 
 // ── Init ──────────────────────────────────────────────────
@@ -52,7 +93,9 @@ async function init() {
   try {
     bridge = await waitForEvenAppBridge();
     bridge.onEvenHubEvent(onEvent);
-    await createDisplay();
+    // Create initial display
+    const r = await bridge.createStartUpPageContainer(startLayout());
+    ready = r === StartUpPageCreateResult.success;
     await boot();
   } catch {}
 }
@@ -60,36 +103,18 @@ async function init() {
 // ── Boot ──────────────────────────────────────────────────
 async function boot() {
   mode = 'boot';
-  await show('Alita\n\nStarting.');
-  await new Promise(r => setTimeout(r, 800));
-  await show('Alita\n\nStarting..');
-  await new Promise(r => setTimeout(r, 800));
-  await show('Alita\n\nStarting...');
-  await new Promise(r => setTimeout(r, 600));
-
+  await setText(1, 'hdr', 'Alita');
+  // Wait then show start
+  await new Promise(r => setTimeout(r, 2000));
   try { const r = await fetch(API_BASE + '/session-info'); if (r.ok) sessionInfo = await r.json(); } catch {}
-
   showStart();
 }
 
 // ── Start Screen ──────────────────────────────────────────
-function showStart() {
+async function showStart() {
   mode = 'start';
-  selIdx = 0;
-  renderStart();
-}
-
-function renderStart() {
-  const hint = sessionInfo?.lastTopic ? '(' + sessionInfo.lastTopic.slice(0, 30) + ')' : '';
-  const lines = [
-    "Hi, I'm Alita",
-    '',
-    selIdx === 0 ? '> Continue' : '  Continue',
-    hint ? '  ' + hint : '',
-    '',
-    selIdx === 1 ? '> New conversation' : '  New conversation',
-  ];
-  show(lines.join('\n'));
+  // Rebuild to show start layout
+  await rebuild(startLayout());
 }
 
 // ── Chat ──────────────────────────────────────────────────
@@ -97,22 +122,29 @@ async function startChat(continued) {
   mode = 'chat';
   selIdx = 0;
 
+  // Build chat layout first
+  replies = [{ text: '...', action: 'wait' }];
+  await rebuild(chatLayout());
+  await setText(2, 'body', 'Loading...');
+
   if (continued) {
-    await show('Loading...');
     try {
       const r = await fetch(API_BASE + '/continue');
       if (r.ok) {
         const d = await r.json();
         history = d.history || [];
-        await show(trunc(d.summary || 'Ready.'));
+        await setText(2, 'body', trunc(d.summary || 'Ready.'));
         makeReplies(d.replies);
-      } else { await show('Ready.'); defaultReplies(); }
-    } catch { await show('Ready.'); defaultReplies(); }
+      } else { await setText(2, 'body', 'Ready.'); defaultReplies(); }
+    } catch { await setText(2, 'body', 'Ready.'); defaultReplies(); }
   } else {
-    await show('New conversation.');
+    await setText(2, 'body', 'New conversation.');
     defaultReplies();
   }
-  renderChat();
+
+  // Rebuild to show replies
+  selIdx = 0;
+  await rebuild(chatLayout());
 }
 
 function defaultReplies() {
@@ -132,70 +164,33 @@ function makeReplies(data) {
   selIdx = 0;
 }
 
-function renderChat() {
-  // Show last response + replies list
-  // Need to get the current body text
-  // For now, just show replies
-  const replyLines = replies.map((r, i) =>
-    (i === selIdx ? '> ' : '  ') + r.text
-  ).join('\n');
-  // We need to preserve the response text... let's store it
-  show(lastResponse + '\n---\n' + replyLines);
-}
-
-let lastResponse = 'Ready.';
-
-// Override show to also track response
-async function showResponse(text) {
-  lastResponse = text;
-  await show(text);
-}
-
 // ── Events ──────────────────────────────────────────────────
 function onEvent(event) {
-  // Capture ALL events for debugging
-  const sysType = event.sysEvent?.eventType || '';
-  const listIdx = event.listEvent?.currentSelectItemIndex;
-  const listType = event.listEvent?.eventType || '';
-  const textName = event.textEvent?.containerName || '';
-
-  // Update debug display
-  lastEvt = sysType || listType || textName || '?';
-
-  // sysEvent handling
-  if (event.sysEvent) {
-    const et = event.sysEvent.eventType;
-
-    if (et === 'swipe_up') {
-      if (mode === 'start') { selIdx = Math.max(0, selIdx - 1); renderStart(); }
-      else if (mode === 'chat') { selIdx = Math.max(0, selIdx - 1); renderChat(); }
-      return;
-    }
-    if (et === 'swipe_down') {
-      if (mode === 'start') { selIdx = Math.min(1, selIdx + 1); renderStart(); }
-      else if (mode === 'chat') { selIdx = Math.min(replies.length - 1, selIdx + 1); renderChat(); }
-      return;
-    }
-    if (et === 'tap' || et === 'press' || et === 'click') {
-      if (mode === 'start') startChat(selIdx === 0);
-      else if (mode === 'chat') doSelect();
-      return;
-    }
-  }
-
-  // listEvent handling
+  // List events: swipe navigates, tap selects (via debounce)
   if (event.listEvent) {
-    if (typeof listIdx === 'number' && listIdx >= 0) {
-      if (mode === 'start') { selIdx = listIdx; renderStart(); }
-      else if (mode === 'chat') { selIdx = listIdx; renderChat(); }
+    const idx = event.listEvent.currentSelectItemIndex;
+    if (typeof idx === 'number' && idx >= 0) {
+      selIdx = idx;
+
+      // Every listEvent resets the tap timer
+      // Swipe fires many events rapidly → timer keeps resetting → never fires
+      // Tap fires one event → timer fires after delay → action triggers
+      if (mode === 'start') {
+        scheduleTap(() => startChat(selIdx === 0));
+      } else if (mode === 'chat') {
+        scheduleTap(doSelect);
+      }
     }
     return;
   }
 
-  // textEvent handling — treat as tap
-  if (event.textEvent) {
-    if (mode === 'start') startChat(selIdx === 0);
-    else if (mode === 'chat') doSelect();
+  // sysEvent: tap/press as backup
+  if (event.sysEvent) {
+    const et = event.sysEvent.eventType;
+    if (et === 'tap' || et === 'press' || et === 'click') {
+      if (mode === 'start') startChat(selIdx === 0);
+      else if (mode === 'chat') doSelect();
+    }
   }
 }
 
@@ -210,7 +205,7 @@ function doSelect() {
 // ── Voice ──────────────────────────────────────────────────
 async function listen() {
   if (!bridge) return;
-  await show('[ Listening... ]');
+  await setText(2, 'body', '[ Listening... ]');
   try {
     await bridge.audioControl(true, AudioInputSource.Glasses);
     const chunks = [];
@@ -222,16 +217,16 @@ async function listen() {
         const buf = new Uint8Array(len); let o = 0;
         for (const c of chunks) { buf.set(c, o); o += c.length; }
         sendAudio(buf);
-      } else await show('No audio.');
+      } else await setText(2, 'body', 'No audio.');
     }, 10000);
-  } catch { await show('MIC error.'); }
+  } catch { await setText(2, 'body', 'MIC error.'); }
 }
 
 // ── API ──────────────────────────────────────────────────
 async function sendMsg(text) {
   if (processing) return;
   processing = true;
-  await show('Thinking...');
+  await setText(2, 'body', 'Thinking...');
   history.push({ role: 'user', content: text });
   try {
     const r = await fetch(API_BASE + '/chat', {
@@ -242,10 +237,11 @@ async function sendMsg(text) {
     if (!r.ok) throw new Error('API ' + r.status);
     const d = await r.json();
     history.push({ role: 'assistant', content: d.response });
-    lastResponse = trunc(d.response);
+    await setText(2, 'body', trunc(d.response));
     makeReplies(d.replies);
-    renderChat();
-  } catch (e) { await show('Error: ' + e.message); }
+    selIdx = 0;
+    await rebuild(chatLayout());
+  } catch (e) { await setText(2, 'body', 'Error: ' + e.message); }
   finally { processing = false; }
 }
 
@@ -259,8 +255,8 @@ async function sendAudio(data) {
     if (!r.ok) throw new Error('Transcribe ' + r.status);
     const d = await r.json();
     if (d.text) sendMsg(d.text);
-    else { await show('No speech.'); processing = false; }
-  } catch { await show('Error.'); processing = false; }
+    else { await setText(2, 'body', 'No speech.'); processing = false; }
+  } catch { await setText(2, 'body', 'Error.'); processing = false; }
 }
 
 init();
