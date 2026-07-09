@@ -186,36 +186,35 @@ function makeReplies(data) {
 }
 
 // ── Events ──────────────────────────────────────────────────
+let lastListEventTime = 0;
+let listDebounceTimer = null;
+
 function onEvent(event) {
-  // List events = swipe navigation (selection changed)
+  // List events = navigation AND selection
+  // Swipe fires rapid listEvents; tap fires a single one
+  // Debounce: wait 400ms after last event, then trigger
   if (event.listEvent) {
     const idx = event.listEvent.currentSelectItemIndex;
     if (typeof idx === 'number' && idx >= 0) {
       if (mode === 'start') startSelectedIndex = idx;
       else if (mode === 'chat') selIdx = idx;
+
+      // Clear previous debounce
+      if (listDebounceTimer) clearTimeout(listDebounceTimer);
+
+      // Debounce: if no more listEvents within 400ms, treat as tap
+      listDebounceTimer = setTimeout(() => {
+        if (mode === 'start') startChat(startSelectedIndex === 0);
+        else if (mode === 'chat') doSelect();
+      }, 400);
     }
-    // Log for debugging
-    log('list: idx=' + idx + ' type=' + (event.listEvent.eventType || ''));
     return;
   }
 
-  // System events = tap/press from touchpad or ring
+  // System events (backup — may not fire for list containers)
   if (event.sysEvent) {
-    const et = event.sysEvent.eventType;
-    log('sys: ' + et);
-
-    // Any sysEvent with tap/press/click = confirm selection
-    if (mode === 'start') {
-      startChat(startSelectedIndex === 0);
-    } else if (mode === 'chat') {
-      doSelect();
-    }
-    return;
-  }
-
-  // Text events (tap on text container)
-  if (event.textEvent) {
-    log('text: ' + (event.textEvent.containerName || ''));
+    if (mode === 'start') startChat(startSelectedIndex === 0);
+    else if (mode === 'chat') doSelect();
   }
 }
 
