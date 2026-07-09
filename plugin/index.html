@@ -5,9 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="icon" type="image/png" sizes="24x24" href="icon.png">
 <title>Alita</title>
-<style>
-  body { display: none; }
-</style>
 </head>
 <body>
 <script type="module">
@@ -17,134 +14,109 @@ import {
   StartUpPageCreateResult,
 } from './node_modules/@evenrealities/even_hub_sdk/dist/index.js';
 
-// ── Config ──────────────────────────────────────────────────
 const API_BASE = 'http://192.168.0.203:9191';
 const MAX_CHARS = 280;
 
 // Glasses: 576 x 288
-const LAYOUT = {
-  header:   { x: 16, y: 8,   w: 544, h: 32 },
-  response: { x: 16, y: 48,  w: 544, h: 168 },
-  replies:  { x: 16, y: 220, w: 544, h: 60 },
+// Layout: header + body (list or text) + bottom list
+const L = {
+  header: { x: 16, y: 8,   w: 544, h: 32 },
+  body:   { x: 16, y: 48,  w: 544, h: 168 },
+  bottom: { x: 16, y: 220, w: 544, h: 60 },
 };
 
-// ── State ──────────────────────────────────────────────────
-let bridge = null;
-let glassesReady = false;
-let mode = 'boot'; // boot | start | chat
-let selectedIndex = 0;
-let startSelectedIndex = 0;
-let replies = []; // { text, action, value? }
-let isProcessing = false;
-let conversationHistory = [];
-let sessionInfo = null;
+let bridge = null, glassesReady = false;
+let mode = 'boot', selectedIndex = 0, startSelectedIndex = 0;
+let replies = [], isProcessing = false, conversationHistory = [], sessionInfo = null;
 
-function log(msg) { console.log('[Alita]', msg); }
+function log(m) { console.log('[Alita]', m); }
 
-// ── Glasses Display ──────────────────────────────────────────────
+// ── Glasses Containers ──────────────────────────────────────────
 
-// Start screen: response captures events (for Continue/New selection)
-function startScreenContainers() {
+// Start screen: greeting in header, Continue/New as list in body
+function startContainers() {
+  const hint = sessionInfo?.lastTopic || '';
   return {
     containerTotalNum: 3,
     textObject: [
-      {
-        xPosition: LAYOUT.header.x, yPosition: LAYOUT.header.y,
-        width: LAYOUT.header.w, height: LAYOUT.header.h,
-        containerID: 1, containerName: 'header',
-        content: '', isEventCapture: 0,
-      },
-      {
-        xPosition: LAYOUT.response.x, yPosition: LAYOUT.response.y,
-        width: LAYOUT.response.w, height: LAYOUT.response.h,
-        containerID: 2, containerName: 'response',
-        content: '', isEventCapture: 1, // captures swipe/tap for selection
-      },
+      { xPosition: L.header.x, yPosition: L.header.y, width: L.header.w, height: L.header.h,
+        containerID: 1, containerName: 'header', content: "Hi, I'm Alita", isEventCapture: 0 },
+      { xPosition: L.bottom.x, yPosition: L.bottom.y, width: L.bottom.w, height: L.bottom.h,
+        containerID: 3, containerName: 'bottom', content: '', isEventCapture: 0 },
     ],
     listObject: [
-      {
-        xPosition: LAYOUT.replies.x, yPosition: LAYOUT.replies.y,
-        width: LAYOUT.replies.w, height: LAYOUT.replies.h,
-        containerID: 3, containerName: 'replies',
-        itemContainer: { itemCount: 1, itemName: [''] },
-        isEventCapture: 0,
-      },
-    ],
-  };
-}
-
-// Chat screen: list container captures events (built-in selection)
-function chatScreenContainers(numReplies) {
-  return {
-    containerTotalNum: 3,
-    textObject: [
-      {
-        xPosition: LAYOUT.header.x, yPosition: LAYOUT.header.y,
-        width: LAYOUT.header.w, height: LAYOUT.header.h,
-        containerID: 1, containerName: 'header',
-        content: '', isEventCapture: 0,
-      },
-      {
-        xPosition: LAYOUT.response.x, yPosition: LAYOUT.response.y,
-        width: LAYOUT.response.w, height: LAYOUT.response.h,
-        containerID: 2, containerName: 'response',
-        content: '', isEventCapture: 0,
-      },
-    ],
-    listObject: [
-      {
-        xPosition: LAYOUT.replies.x, yPosition: LAYOUT.replies.y,
-        width: LAYOUT.replies.w, height: LAYOUT.replies.h,
-        containerID: 3, containerName: 'replies',
+      { xPosition: L.body.x, yPosition: L.body.y, width: L.body.w, height: L.body.h,
+        containerID: 2, containerName: 'body',
         itemContainer: {
-          itemCount: Math.max(1, numReplies),
-          itemName: replies.map(r => r.text) || [''],
+          itemCount: 2,
+          itemName: [
+            'Continue' + (hint ? '  (' + hint.slice(0, 35) + ')' : ''),
+            'New conversation',
+          ],
         },
-        isEventCapture: 1, // list handles swipe navigation natively
-      },
+        isEventCapture: 1 },
     ],
   };
 }
 
-async function rebuildForStart() {
-  if (!bridge) return;
-  try {
-    await bridge.rebuildPageContainer(startScreenContainers());
-    glassesReady = true;
-  } catch (e) { log('rebuild start: ' + e.message); }
+// Chat screen: response as text, replies as list
+function chatContainers() {
+  return {
+    containerTotalNum: 3,
+    textObject: [
+      { xPosition: L.header.x, yPosition: L.header.y, width: L.header.w, height: L.header.h,
+        containerID: 1, containerName: 'header', content: 'Alita', isEventCapture: 0 },
+      { xPosition: L.body.x, yPosition: L.body.y, width: L.body.w, height: L.body.h,
+        containerID: 2, containerName: 'body', content: '', isEventCapture: 0 },
+    ],
+    listObject: [
+      { xPosition: L.bottom.x, yPosition: L.bottom.y, width: L.bottom.w, height: L.bottom.h,
+        containerID: 3, containerName: 'bottom',
+        itemContainer: {
+          itemCount: Math.max(1, replies.length),
+          itemName: replies.map(r => r.text),
+        },
+        isEventCapture: 1 },
+    ],
+  };
 }
 
-async function rebuildForChat() {
+// Thinking/loading state: all text, no list events
+function thinkingContainers() {
+  return {
+    containerTotalNum: 3,
+    textObject: [
+      { xPosition: L.header.x, yPosition: L.header.y, width: L.header.w, height: L.header.h,
+        containerID: 1, containerName: 'header', content: 'Alita', isEventCapture: 0 },
+      { xPosition: L.body.x, yPosition: L.body.y, width: L.body.w, height: L.body.h,
+        containerID: 2, containerName: 'body', content: '', isEventCapture: 0 },
+      { xPosition: L.bottom.x, yPosition: L.bottom.y, width: L.bottom.w, height: L.bottom.h,
+        containerID: 3, containerName: 'bottom', content: '', isEventCapture: 0 },
+    ],
+  };
+}
+
+async function rebuild(layout) {
   if (!bridge) return;
   try {
-    await bridge.rebuildPageContainer(chatScreenContainers(replies.length));
+    await bridge.rebuildPageContainer(layout);
     glassesReady = true;
-  } catch (e) { log('rebuild chat: ' + e.message); }
+  } catch (e) { log('rebuild: ' + e.message); }
 }
 
 async function initGlasses() {
   if (!bridge) return;
   try {
-    const r = await bridge.createStartUpPageContainer(startScreenContainers());
+    const r = await bridge.createStartUpPageContainer(startContainers());
     glassesReady = r === StartUpPageCreateResult.success;
     log('Glasses: ' + (glassesReady ? 'OK' : 'FAIL'));
-  } catch (e) { log('init error: ' + e.message); }
+  } catch (e) { log('init: ' + e.message); }
 }
 
-async function push(id, name, content) {
+async function pushText(id, name, content) {
   if (!bridge || !glassesReady) return;
   try { await bridge.textContainerUpgrade({ containerID: id, containerName: name, content }); }
-  catch (e) { log('push: ' + name); }
-}
-
-async function pushHeader(t) { await push(1, 'header', t); }
-async function pushResponse(t) { await push(2, 'response', t); }
-
-async function pushReplyList() {
-  if (!bridge || !glassesReady) return;
-  try {
-    await bridge.rebuildPageContainer(chatScreenContainers(replies.length));
-  } catch (e) { log('rebuild replies: ' + e.message); }
+  catch {}
 }
 
 // ── Init ──────────────────────────────────────────────────
@@ -154,22 +126,20 @@ async function init() {
     log('Bridge OK');
     bridge.onEvenHubEvent(handleEvent);
     await initGlasses();
-    await bootSequence();
-  } catch (e) {
-    log('Bridge fail: ' + e.message);
-  }
+    await boot();
+  } catch (e) { log('Bridge fail: ' + e.message); }
 }
 
 // ── Boot ──────────────────────────────────────────────────
-async function bootSequence() {
+async function boot() {
   mode = 'boot';
   if (glassesReady) {
-    await pushHeader('Alita');
-    await pushResponse('Starting.');
+    await pushText(1, 'header', 'Alita');
+    await pushText(2, 'body', 'Starting.');
     await new Promise(r => setTimeout(r, 800));
-    await pushResponse('Starting..');
+    await pushText(2, 'body', 'Starting..');
     await new Promise(r => setTimeout(r, 800));
-    await pushResponse('Starting...');
+    await pushText(2, 'body', 'Starting...');
     await new Promise(r => setTimeout(r, 600));
   }
   await fetchSessionInfo();
@@ -187,53 +157,41 @@ async function fetchSessionInfo() {
 async function showStartScreen() {
   mode = 'start';
   startSelectedIndex = 0;
-  await rebuildForStart();
-  renderStart();
-}
-
-async function renderStart() {
-  const hint = sessionInfo?.lastTopic || '';
-  const lines = [
-    "Hi, I'm Alita",
-    '',
-    startSelectedIndex === 0 ? '> Continue' : '  Continue',
-    hint ? '  ' + hint.slice(0, 40) : '',
-    '',
-    startSelectedIndex === 1 ? '> New conversation' : '  New conversation',
-  ].join('\n');
-
-  await pushHeader('Alita');
-  await pushResponse(lines);
+  // List container handles selection natively
+  await rebuild(startContainers());
 }
 
 // ── Chat ──────────────────────────────────────────────────
 async function startChat(continueSession) {
   mode = 'chat';
 
+  // Show loading state (no list, just text)
+  await rebuild(thinkingContainers());
+  await pushText(2, 'body', 'Loading...');
+
   if (continueSession) {
-    await pushResponse('Loading...');
     try {
       const res = await fetch(API_BASE + '/continue');
       if (res.ok) {
         const d = await res.json();
         conversationHistory = d.history || [];
-        await showText(d.summary || 'Ready.');
+        await pushText(2, 'body', trunc(d.summary || 'Ready.'));
         loadReplies(d.replies);
       } else {
-        await showText('Ready.');
+        await pushText(2, 'body', 'Ready.');
         defaultReplies();
       }
     } catch {
-      await showText('Ready.');
+      await pushText(2, 'body', 'Ready.');
       defaultReplies();
     }
   } else {
-    await showText('New conversation.');
+    await pushText(2, 'body', 'New conversation.');
     defaultReplies();
   }
 
-  // Build list container with replies
-  await pushReplyList();
+  // Now rebuild with reply list
+  await rebuild(chatContainers());
 }
 
 function defaultReplies() {
@@ -242,70 +200,58 @@ function defaultReplies() {
     { text: 'What can you do?', action: 'text', value: 'What can you do?' },
     { text: 'What time is it?', action: 'text', value: 'What time is it?' },
     { text: 'Calendar', action: 'text', value: "What's on my calendar?" },
-    { text: 'Help', action: 'text', value: 'Help me with something' },
+    { text: 'Help', action: 'text', value: 'Help me' },
   ];
   selectedIndex = 0;
 }
 
-function loadReplies(dataReplies) {
-  if (dataReplies?.length > 0) {
+function loadReplies(data) {
+  if (data?.length > 0) {
     replies = [
       { text: 'Speak', action: 'speak' },
-      ...dataReplies.map(r => ({ text: r, action: 'text', value: r })),
+      ...data.map(r => ({ text: r, action: 'text', value: r })),
     ];
-  } else {
-    defaultReplies();
-  }
+  } else { defaultReplies(); }
   selectedIndex = 0;
 }
 
-async function showText(text) {
-  let t = text || '';
-  if (t.length > MAX_CHARS) t = t.slice(0, MAX_CHARS) + '...';
-  await pushResponse(t);
+function trunc(t) {
+  let s = t || '';
+  return s.length > MAX_CHARS ? s.slice(0, MAX_CHARS) + '...' : s;
 }
 
 // ── Events ──────────────────────────────────────────────────
 function handleEvent(event) {
-  log('Event: ' + JSON.stringify(event.sysEvent?.eventType || event.listEvent?.eventType || 'other'));
-
-  // List container events (reply selection in chat mode)
-  if (event.listEvent && mode === 'chat') {
+  // List events (selection in list containers)
+  if (event.listEvent) {
     const { currentSelectItemIndex, eventType } = event.listEvent;
     selectedIndex = currentSelectItemIndex;
-    if (eventType === 'click' || eventType === 'tap') {
-      doReplySelect();
-    }
-    return;
-  }
-
-  // System events (touchpad / ring)
-  if (event.sysEvent) {
-    const et = event.sysEvent.eventType;
 
     if (mode === 'start') {
-      if (et === 'swipe_up') {
-        startSelectedIndex = Math.max(0, startSelectedIndex - 1);
-        renderStart();
-      } else if (et === 'swipe_down') {
-        startSelectedIndex = Math.min(1, startSelectedIndex + 1);
-        renderStart();
-      } else if (et === 'tap' || et === 'press' || et === 'click') {
-        doStartSelect();
-      }
+      startSelectedIndex = currentSelectItemIndex;
+      if (eventType === 'click' || eventType === 'tap') doStartSelect();
       return;
     }
 
     if (mode === 'chat') {
-      if (et === 'swipe_up') {
-        selectedIndex = Math.max(0, selectedIndex - 1);
-        pushReplyList();
-      } else if (et === 'swipe_down') {
-        selectedIndex = Math.min(replies.length - 1, selectedIndex + 1);
-        pushReplyList();
-      } else if (et === 'tap' || et === 'press' || et === 'click') {
-        doReplySelect();
-      }
+      selectedIndex = currentSelectItemIndex;
+      if (eventType === 'click' || eventType === 'tap') doReplySelect();
+      return;
+    }
+  }
+
+  // System events (backup — list containers handle most input)
+  if (event.sysEvent) {
+    const et = event.sysEvent.eventType;
+
+    if (mode === 'start') {
+      if (et === 'tap' || et === 'press' || et === 'click') doStartSelect();
+      return;
+    }
+
+    if (mode === 'chat') {
+      if (et === 'tap' || et === 'press' || et === 'click') doReplySelect();
+      return;
     }
   }
 }
@@ -316,16 +262,17 @@ function doStartSelect() {
 
 function doReplySelect() {
   if (isProcessing) return;
-  const reply = replies[selectedIndex];
-  if (!reply) return;
-  if (reply.action === 'speak') startListening();
-  else if (reply.action === 'text') sendMessage(reply.value || reply.text);
+  const r = replies[selectedIndex];
+  if (!r) return;
+  if (r.action === 'speak') startListening();
+  else if (r.action === 'text') sendMessage(r.value || r.text);
 }
 
 // ── Voice ──────────────────────────────────────────────────
 async function startListening() {
   if (!bridge) return;
-  await showText('[ Listening... ]');
+  await rebuild(thinkingContainers());
+  await pushText(2, 'body', '[ Listening... ]');
   try {
     await bridge.audioControl(true, AudioInputSource.Glasses);
     const chunks = [];
@@ -342,11 +289,11 @@ async function startListening() {
         for (const c of chunks) { buf.set(c, off); off += c.length; }
         sendAudio(buf);
       } else {
-        await showText('No audio.');
+        await pushText(2, 'body', 'No audio.');
       }
     }, 10000);
   } catch (e) {
-    await showText('MIC error.');
+    await pushText(2, 'body', 'MIC error.');
   }
 }
 
@@ -354,7 +301,11 @@ async function startListening() {
 async function sendMessage(text) {
   if (isProcessing) return;
   isProcessing = true;
-  await showText('Thinking...');
+
+  // Show thinking (no list events during processing)
+  await rebuild(thinkingContainers());
+  await pushText(2, 'body', 'Thinking...');
+
   conversationHistory.push({ role: 'user', content: text });
 
   try {
@@ -366,11 +317,12 @@ async function sendMessage(text) {
     if (!res.ok) throw new Error('API ' + res.status);
     const data = await res.json();
     conversationHistory.push({ role: 'assistant', content: data.response });
-    await showText(data.response);
+
+    await pushText(2, 'body', trunc(data.response));
     loadReplies(data.replies);
-    await pushReplyList();
+    await rebuild(chatContainers());
   } catch (e) {
-    await showText('Error: ' + e.message);
+    await pushText(2, 'body', 'Error: ' + e.message);
   } finally {
     isProcessing = false;
   }
@@ -388,9 +340,9 @@ async function sendAudio(audioData) {
     if (!res.ok) throw new Error('Transcribe ' + res.status);
     const data = await res.json();
     if (data.text) sendMessage(data.text);
-    else { await showText('No speech.'); isProcessing = false; }
+    else { await pushText(2, 'body', 'No speech.'); isProcessing = false; }
   } catch {
-    await showText('Transcribe error.');
+    await pushText(2, 'body', 'Transcribe error.');
     isProcessing = false;
   }
 }
