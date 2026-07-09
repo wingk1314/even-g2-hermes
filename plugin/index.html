@@ -196,30 +196,38 @@ function onEvent(event) {
   // List selection events
   if (event.listEvent) {
     const idx = event.listEvent.currentSelectItemIndex;
-    const type = event.listEvent.eventType;
+    const type = (event.listEvent.eventType || '').toLowerCase();
+    const name = event.listEvent.currentSelectItemName || '';
 
-    if (mode === 'start') {
-      // idx 0 = Continue, idx 1 = New
-      if (type === 'click' || type === 'tap') {
-        startChat(idx === 0);
-      }
-      return;
+    log('listEvent: type=' + type + ' idx=' + idx + ' name=' + name);
+
+    // Update selection index on any event
+    if (typeof idx === 'number' && idx >= 0) {
+      if (mode === 'start') startSelectedIndex = idx;
+      else if (mode === 'chat') selIdx = idx;
     }
 
-    if (mode === 'chat') {
-      selIdx = idx;
-      if (type === 'click' || type === 'tap') {
-        doSelect();
-      }
-      return;
+    // Only trigger action on tap/click-like events
+    const isTap = type === 'click' || type === 'tap' || type === 'press'
+      || type === 'select' || type === 'confirm' || type === 'submit';
+
+    if (isTap) {
+      if (mode === 'start') startChat(startSelectedIndex === 0);
+      else if (mode === 'chat') doSelect();
     }
+    return;
   }
 
-  // System events (tap/press as backup)
+  // System events (touchpad tap / ring press)
   if (event.sysEvent) {
-    const et = event.sysEvent.eventType;
-    if (et === 'tap' || et === 'press' || et === 'click') {
-      if (mode === 'start') startChat(0 === 0); // default Continue
+    const et = (event.sysEvent.eventType || '').toLowerCase();
+    log('sysEvent: ' + et);
+
+    const isTap = et === 'tap' || et === 'press' || et === 'click'
+      || et === 'select' || et === 'confirm';
+
+    if (isTap) {
+      if (mode === 'start') startChat(startSelectedIndex === 0);
       else if (mode === 'chat') doSelect();
     }
   }
