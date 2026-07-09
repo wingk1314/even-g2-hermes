@@ -15,36 +15,35 @@ import {
 } from './node_modules/@evenrealities/even_hub_sdk/dist/index.js';
 
 const API_BASE = 'http://192.168.0.203:9191';
-const MAX = 280;
+const MAX = 400;
 
 let bridge = null, ready = false, mode = 'boot';
-let selIdx = 0, startSel = 0, replies = [], processing = false;
+let selIdx = 0, replies = [], processing = false;
 let history = [], sessionInfo = null;
+let lastEvt = ''; // show last event on screen for debugging
 
 function trunc(s) { return (s || '').length > MAX ? s.slice(0, MAX) + '...' : s || ''; }
 
-// ── Display: 3 text containers, event capture on container 3 ──
+// ── ONE container — everything rendered as text ──────────────
 async function createDisplay() {
   if (!bridge) return;
   try {
     const r = await bridge.createStartUpPageContainer({
-      containerTotalNum: 3,
-      textObject: [
-        { xPosition: 16, yPosition: 8, width: 544, height: 32,
-          containerID: 1, containerName: 'hdr', content: '', isEventCapture: 0 },
-        { xPosition: 16, yPosition: 48, width: 544, height: 168,
-          containerID: 2, containerName: 'body', content: '', isEventCapture: 0 },
-        { xPosition: 16, yPosition: 224, width: 544, height: 56,
-          containerID: 3, containerName: 'ftr', content: '', isEventCapture: 1 },
-      ],
+      containerTotalNum: 1,
+      textObject: [{
+        xPosition: 16, yPosition: 8, width: 544, height: 272,
+        containerID: 1, containerName: 'main',
+        content: '',
+        isEventCapture: 1,
+      }],
     });
     ready = r === StartUpPageCreateResult.success;
-  } catch (e) { console.error('createDisplay', e); }
+  } catch {}
 }
 
-async function set(id, name, text) {
+async function show(text) {
   if (!bridge || !ready) return;
-  try { await bridge.textContainerUpgrade({ containerID: id, containerName: name, content: text }); }
+  try { await bridge.textContainerUpgrade({ containerID: 1, containerName: 'main', content: text }); }
   catch {}
 }
 
@@ -55,50 +54,42 @@ async function init() {
     bridge.onEvenHubEvent(onEvent);
     await createDisplay();
     await boot();
-  } catch (e) {
-    // No bridge — still try to show something
-    console.error('init', e);
-  }
+  } catch {}
 }
 
 // ── Boot ──────────────────────────────────────────────────
 async function boot() {
   mode = 'boot';
-  await set(1, 'hdr', 'Alita');
-  await set(2, 'body', 'Starting.');
-  await set(3, 'ftr', '');
-  await sleep(800);
-  await set(2, 'body', 'Starting..');
-  await sleep(800);
-  await set(2, 'body', 'Starting...');
-  await sleep(600);
+  await show('Alita\n\nStarting.');
+  await new Promise(r => setTimeout(r, 800));
+  await show('Alita\n\nStarting..');
+  await new Promise(r => setTimeout(r, 800));
+  await show('Alita\n\nStarting...');
+  await new Promise(r => setTimeout(r, 600));
 
-  // Fetch session info
   try { const r = await fetch(API_BASE + '/session-info'); if (r.ok) sessionInfo = await r.json(); } catch {}
 
   showStart();
 }
 
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
 // ── Start Screen ──────────────────────────────────────────
 function showStart() {
   mode = 'start';
-  startSel = 0;
+  selIdx = 0;
   renderStart();
 }
 
 function renderStart() {
-  set(1, 'hdr', "Hi, I'm Alita");
   const hint = sessionInfo?.lastTopic ? '(' + sessionInfo.lastTopic.slice(0, 30) + ')' : '';
   const lines = [
-    startSel === 0 ? '> Continue' : '  Continue',
+    "Hi, I'm Alita",
+    '',
+    selIdx === 0 ? '> Continue' : '  Continue',
     hint ? '  ' + hint : '',
     '',
-    startSel === 1 ? '> New conversation' : '  New conversation',
-  ].join('\n');
-  set(2, 'body', lines);
-  set(3, 'ftr', 'tap to select');
+    selIdx === 1 ? '> New conversation' : '  New conversation',
+  ];
+  show(lines.join('\n'));
 }
 
 // ── Chat ──────────────────────────────────────────────────
@@ -106,29 +97,22 @@ async function startChat(continued) {
   mode = 'chat';
   selIdx = 0;
 
-  await set(1, 'hdr', 'Alita');
-  await set(2, 'body', 'Loading...');
-  await set(3, 'ftr', '');
-
   if (continued) {
+    await show('Loading...');
     try {
       const r = await fetch(API_BASE + '/continue');
       if (r.ok) {
         const d = await r.json();
         history = d.history || [];
-        await set(2, 'body', trunc(d.summary || 'Ready.'));
+        await show(trunc(d.summary || 'Ready.'));
         makeReplies(d.replies);
-      } else {
-        await set(2, 'body', 'Ready.');
-        defaultReplies();
-      }
-    } catch { await set(2, 'body', 'Ready.'); defaultReplies(); }
+      } else { await show('Ready.'); defaultReplies(); }
+    } catch { await show('Ready.'); defaultReplies(); }
   } else {
-    await set(2, 'body', 'New conversation.');
+    await show('New conversation.');
     defaultReplies();
   }
-
-  renderReplies();
+  renderChat();
 }
 
 function defaultReplies() {
@@ -148,42 +132,69 @@ function makeReplies(data) {
   selIdx = 0;
 }
 
-function renderReplies() {
-  const lines = replies.map((r, i) =>
+function renderChat() {
+  // Show last response + replies list
+  // Need to get the current body text
+  // For now, just show replies
+  const replyLines = replies.map((r, i) =>
     (i === selIdx ? '> ' : '  ') + r.text
   ).join('\n');
-  set(3, 'ftr', lines);
+  // We need to preserve the response text... let's store it
+  show(lastResponse + '\n---\n' + replyLines);
+}
+
+let lastResponse = 'Ready.';
+
+// Override show to also track response
+async function showResponse(text) {
+  lastResponse = text;
+  await show(text);
 }
 
 // ── Events ──────────────────────────────────────────────────
 function onEvent(event) {
-  // sysEvent = touchpad/ring gestures
+  // Capture ALL events for debugging
+  const sysType = event.sysEvent?.eventType || '';
+  const listIdx = event.listEvent?.currentSelectItemIndex;
+  const listType = event.listEvent?.eventType || '';
+  const textName = event.textEvent?.containerName || '';
+
+  // Update debug display
+  lastEvt = sysType || listType || textName || '?';
+
+  // sysEvent handling
   if (event.sysEvent) {
     const et = event.sysEvent.eventType;
 
-    // Swipe = navigate selection
     if (et === 'swipe_up') {
-      if (mode === 'start') { startSel = Math.max(0, startSel - 1); renderStart(); }
-      else if (mode === 'chat') { selIdx = Math.max(0, selIdx - 1); renderReplies(); }
+      if (mode === 'start') { selIdx = Math.max(0, selIdx - 1); renderStart(); }
+      else if (mode === 'chat') { selIdx = Math.max(0, selIdx - 1); renderChat(); }
       return;
     }
     if (et === 'swipe_down') {
-      if (mode === 'start') { startSel = Math.min(1, startSel + 1); renderStart(); }
-      else if (mode === 'chat') { selIdx = Math.min(replies.length - 1, selIdx + 1); renderReplies(); }
+      if (mode === 'start') { selIdx = Math.min(1, selIdx + 1); renderStart(); }
+      else if (mode === 'chat') { selIdx = Math.min(replies.length - 1, selIdx + 1); renderChat(); }
       return;
     }
-
-    // Tap/press = confirm selection
     if (et === 'tap' || et === 'press' || et === 'click') {
-      if (mode === 'start') startChat(startSel === 0);
+      if (mode === 'start') startChat(selIdx === 0);
       else if (mode === 'chat') doSelect();
       return;
     }
   }
 
-  // textEvent = tap on text container
+  // listEvent handling
+  if (event.listEvent) {
+    if (typeof listIdx === 'number' && listIdx >= 0) {
+      if (mode === 'start') { selIdx = listIdx; renderStart(); }
+      else if (mode === 'chat') { selIdx = listIdx; renderChat(); }
+    }
+    return;
+  }
+
+  // textEvent handling — treat as tap
   if (event.textEvent) {
-    if (mode === 'start') startChat(startSel === 0);
+    if (mode === 'start') startChat(selIdx === 0);
     else if (mode === 'chat') doSelect();
   }
 }
@@ -199,7 +210,7 @@ function doSelect() {
 // ── Voice ──────────────────────────────────────────────────
 async function listen() {
   if (!bridge) return;
-  await set(2, 'body', '[ Listening... ]');
+  await show('[ Listening... ]');
   try {
     await bridge.audioControl(true, AudioInputSource.Glasses);
     const chunks = [];
@@ -211,16 +222,16 @@ async function listen() {
         const buf = new Uint8Array(len); let o = 0;
         for (const c of chunks) { buf.set(c, o); o += c.length; }
         sendAudio(buf);
-      } else await set(2, 'body', 'No audio.');
+      } else await show('No audio.');
     }, 10000);
-  } catch { await set(2, 'body', 'MIC error.'); }
+  } catch { await show('MIC error.'); }
 }
 
 // ── API ──────────────────────────────────────────────────
 async function sendMsg(text) {
   if (processing) return;
   processing = true;
-  await set(2, 'body', 'Thinking...');
+  await show('Thinking...');
   history.push({ role: 'user', content: text });
   try {
     const r = await fetch(API_BASE + '/chat', {
@@ -231,10 +242,10 @@ async function sendMsg(text) {
     if (!r.ok) throw new Error('API ' + r.status);
     const d = await r.json();
     history.push({ role: 'assistant', content: d.response });
-    await set(2, 'body', trunc(d.response));
+    lastResponse = trunc(d.response);
     makeReplies(d.replies);
-    renderReplies();
-  } catch (e) { await set(2, 'body', 'Error: ' + e.message); }
+    renderChat();
+  } catch (e) { await show('Error: ' + e.message); }
   finally { processing = false; }
 }
 
@@ -248,8 +259,8 @@ async function sendAudio(data) {
     if (!r.ok) throw new Error('Transcribe ' + r.status);
     const d = await r.json();
     if (d.text) sendMsg(d.text);
-    else { await set(2, 'body', 'No speech.'); processing = false; }
-  } catch { await set(2, 'body', 'Error.'); processing = false; }
+    else { await show('No speech.'); processing = false; }
+  } catch { await show('Error.'); processing = false; }
 }
 
 init();
