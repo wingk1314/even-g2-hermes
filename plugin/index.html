@@ -166,31 +166,25 @@ function makeReplies(data) {
 
 // ── Events ──────────────────────────────────────────────────
 function onEvent(event) {
-  // List events: swipe navigates, tap selects (via debounce)
+  // List events: swipe navigation only, debounce for tap
   if (event.listEvent) {
     const idx = event.listEvent.currentSelectItemIndex;
     if (typeof idx === 'number' && idx >= 0) {
       selIdx = idx;
-
-      // Every listEvent resets the tap timer
-      // Swipe fires many events rapidly → timer keeps resetting → never fires
-      // Tap fires one event → timer fires after delay → action triggers
-      if (mode === 'start') {
-        scheduleTap(() => startChat(selIdx === 0));
-      } else if (mode === 'chat') {
-        scheduleTap(doSelect);
-      }
+      // Debounce: if no more events in 500ms, treat as tap
+      scheduleTap(() => {
+        if (mode === 'start') startChat(selIdx === 0);
+        else if (mode === 'chat') doSelect();
+      });
     }
     return;
   }
 
-  // sysEvent: tap/press as backup
+  // sysEvent: tap/press fires immediately
   if (event.sysEvent) {
-    const et = event.sysEvent.eventType;
-    if (et === 'tap' || et === 'press' || et === 'click') {
-      if (mode === 'start') startChat(selIdx === 0);
-      else if (mode === 'chat') doSelect();
-    }
+    cancelTap(); // cancel any pending debounce
+    if (mode === 'start') startChat(selIdx === 0);
+    else if (mode === 'chat') doSelect();
   }
 }
 
